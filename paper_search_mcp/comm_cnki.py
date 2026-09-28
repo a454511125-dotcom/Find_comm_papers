@@ -1,4 +1,4 @@
-"""Serialized, long-lived bridge to the installed CNKI Python environment."""
+"""CNKI functions integrated in the same process and Python environment as English."""
 from __future__ import annotations
 
 import asyncio
@@ -8,49 +8,36 @@ import json
 import os
 import threading
 import uuid
-from datetime import timedelta
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
+from .comm_cnki_host import CNKIBackend
 from .comm_download import data_dir, verify_pdf
 from .comm_manifest import persistent_lock
 
 
 def configuration():
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
-    path = Path(os.environ.get("COMM_CNKI_MCP_CONFIG") or Path.home() / ".codex" / "config.toml")
-    config = tomllib.loads(path.read_text(encoding="utf-8-sig")).get("mcp_servers", {}).get("cnki", {})
-    command = config.get("command", "")
-    if not command or not Path(command).is_file():
-        raise RuntimeError("cnki_python_not_configured")
-    if not Path(command).name.lower().startswith("python") or config.get("args") != ["-m", "server"]:
-        raise RuntimeError("cnki_configuration_not_supported: expected the installed Python server")
-    env = {**os.environ, **config.get("env", {})}
-    binary = env.get("CLOAKBROWSER_BINARY_PATH", "")
-    if not binary or not Path(binary).is_file():
-        raise RuntimeError("cnki_browser_binary_required: automatic installation is disabled")
-    session = data_dir() / "cnki-bridge" / uuid.uuid4().hex
+    """Read this service's direct settings only; no other MCP installation is used."""
+    binary = os.environ.get("COMM_CNKI_BROWSER_PATH") or os.environ.get("CLOAKBROWSER_BINARY_PATH")
+    seed = os.environ.get("COMM_CNKI_COOKIE_FILE")
+    if binary and not Path(binary).is_file():
+        raise RuntimeError("cnki_browser_binary_missing: configure COMM_CNKI_BROWSER_PATH")
+    if seed and not Path(seed).is_file():
+        raise RuntimeError("cnki_seed_cookie_file_missing: configure COMM_CNKI_COOKIE_FILE")
+    session = data_dir() / "cnki" / uuid.uuid4().hex
     session.mkdir(parents=True)
-    env.update({"PROFILE_DIR": str(session / "profile"), "COOKIE_FILE": str(session / "cookies.json"),
-                "COMM_CNKI_ORIGINAL_COOKIES": config.get("env", {}).get("COOKIE_FILE", ""),
-                "PDF_DIR": str(session / "retained-files"), "COMM_CNKI_SESSION": str(session),
-                "DELETE_PDF_AFTER_IMPORT": "false", "CLOAKBROWSER_AUTO_UPDATE": "false",
-                "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
-    return StdioServerParameters(command=command, args=["-B", "-X", "utf8", str(Path(__file__).with_name("comm_cnki_host.py"))], env=env)
+    return {"session_path": session, "browser_binary": Path(binary) if binary else None,
+            "seed_cookie_file": Path(seed) if seed else None}
 
 
 class Worker:
+    """Serialize direct Python calls on one long-lived browser event loop."""
     def __init__(self):
         self.loop = asyncio.new_event_loop()
         self.ready = concurrent.futures.Future()
         self.pending = set()
         self.pending_lock = threading.Lock()
-        self.thread = threading.Thread(target=self._run, daemon=True, name="comm-cnki")
+        self.closing = False
+        self.thread = threading.Thread(target=self._run, daemon=True, name="find-cnki")
         self.thread.start()
 
     def _run(self):
@@ -60,60 +47,65 @@ class Worker:
             self.loop.run_until_complete(self.task)
         except BaseException as exc:
             if not self.ready.done():
-                self.ready.set_exception(RuntimeError(type(exc).__name__ + ": CNKI bridge unavailable"))
+                self.ready.set_exception(RuntimeError(type(exc).__name__ + ": integrated CNKI unavailable"))
         finally:
             with self.pending_lock:
                 for reply in self.pending:
                     if not reply.done():
-                        reply.set_result({"success": False, "message": "CNKI bridge stopped; retry after restarting the MCP"})
+                        reply.set_result({"success": False, "message": "CNKI operation stopped; retry after restarting the MCP"})
                 self.pending.clear()
+            tasks = asyncio.all_tasks(self.loop)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                self.loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            self.loop.run_until_complete(self.loop.shutdown_asyncgens())
             self.loop.close()
 
     async def _serve(self):
         self.queue = asyncio.Queue()
-        async with stdio_client(configuration()) as (read, write):
-            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=180)) as session:
-                await session.initialize()
-                self.ready.set_result(True)
-                while True:
-                    request = await self.queue.get()
-                    if request is None:
-                        return
-                    name, arguments, reply = request
-                    try:
-                        with persistent_lock(data_dir() / "cnki-bridge" / "request.lock"):
-                            result = await session.call_tool(name, arguments)
-                        if result.isError:
-                            raise RuntimeError("cnki_tool_failed")
-                        value = result.structuredContent
-                        if value is None:
-                            value = json.loads(next(c.text for c in result.content if c.type == "text"))
-                        if not reply.done():
-                            reply.set_result(value)
-                    except Exception as exc:
-                        if not reply.done():
-                            reply.set_result({"success": False, "message": "CNKI bridge: " + type(exc).__name__})
+        backend = CNKIBackend(**configuration())
+        try:
+            self.ready.set_result(True)
+            while True:
+                name, arguments, reply = await self.queue.get()
+                try:
+                    method = {"cnki_search": backend.search, "cnki_download": backend.download}[name]
+                    with persistent_lock(data_dir() / "cnki" / "request.lock"):
+                        value = await method(**arguments)
+                    if not reply.done():
+                        reply.set_result(value)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if not reply.done():
+                        reply.set_result({"success": False, "message": "Integrated CNKI: " + type(exc).__name__})
+        finally:
+            await backend.close()
 
     async def call(self, name, arguments):
+        if name not in {"cnki_search", "cnki_download"}:
+            raise ValueError("Unknown CNKI operation")
         await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(self.ready)), timeout=45)
-        if not self.thread.is_alive():
-            return {"success": False, "message": "CNKI bridge stopped; restart the unified MCP"}
+        if self.closing or not self.thread.is_alive():
+            return {"success": False, "message": "CNKI worker stopped; restart the unified MCP"}
         future = concurrent.futures.Future()
         with self.pending_lock:
             self.pending.add(future)
         self.loop.call_soon_threadsafe(self.queue.put_nowait, (name, arguments, future))
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(future), timeout=240)
+            return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), timeout=240)
         except asyncio.TimeoutError:
-            return {"success": False, "message": "CNKI bridge timed out; the queued operation may still be running"}
+            return {"success": False, "message": "CNKI timed out; the queued operation may still be running"}
         finally:
             with self.pending_lock:
                 self.pending.discard(future)
 
     def close(self):
+        self.closing = True
         if self.thread.is_alive() and hasattr(self, "task"):
             self.loop.call_soon_threadsafe(self.task.cancel)
-            self.thread.join(timeout=15)
+            self.thread.join(timeout=20)
 
 
 _worker = None
@@ -123,7 +115,7 @@ _guard = threading.Lock()
 async def call(name, arguments):
     global _worker
     with _guard:
-        if _worker is None:
+        if _worker is None or not _worker.thread.is_alive():
             _worker = Worker()
             atexit.register(_worker.close)
     return await _worker.call(name, arguments)

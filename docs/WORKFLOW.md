@@ -1,6 +1,6 @@
 # Computational communication literature workflow
 
-## Bilingual entry (0.3.1)
+## Bilingual entry (0.4.0)
 
 `comm_search_bilingual` accepts a research question, one explicit Chinese keyword/concept per call and 1â€“6 explicit English query variants. The calling assistant prepares and discloses those queries; the MCP does not call a hidden translation service. For example:
 
@@ -12,13 +12,13 @@ CNKI supplies the Chinese lane. Each request uses one keyword/concept, such as ç
 
 There is **no cross-language deduplication**, including in mixed reranking, download batches and saved selections. English multi-provider deduplication and duplicate checking against the Zotero library remain enabled. When reranking a mixed list directly, supply keywords for both languages; otherwise save the reviewed bilingual search order without reranking.
 
-Chinese navigation starts at https://www.cnki.net/, follows the homepage form, and submits the search-page form if navigation only prefills its keyword. Relevance sorting is selected explicitly. Retrieval diagnostics distinguish fetched records, date filtering and whitelist filtering. Hidden/transparent/offscreen challenge templates do not count as a user-facing CAPTCHA. The Chinese bridge reuses the installed `mcp_servers.cnki` Python environment and existing CloakBrowser executable. Set `COMM_CNKI_MCP_CONFIG` to use an alternate configuration file. It starts a separate browser profile for each MCP process, seeds the existing CNKI cookies once, and serializes calls. The original CNKI MCP is retained and may still be used separately. Missing backend dependencies affect Chinese operations only. Manual login/security verification can still be required in the separate browser. Verification pages stay open while that MCP process runs; do not restart it before completing verification and retrying.
+Chinese navigation starts at https://www.cnki.net/, follows the homepage form, and submits the search-page form if navigation only prefills its keyword. Relevance sorting is selected explicitly. The original Chinese search/parsing/download-button implementations are integrated in the same Python package and called directly within one service. No secondary MCP server, original CNKI Python environment, or `[mcp_servers.cnki]` configuration is used. `COMM_CNKI_BROWSER_PATH` directly selects the existing browser executable. Browser sessions and cookies remain in the service data directory. Search and download share one browser event loop; hidden/transparent/offscreen challenge templates do not count as a user-facing CAPTCHA. Blank verification pages are reported separately. Complete visible verification in the open browser before retrying in the same MCP process.
 
 Chinese journal search retains the existing communication-journal whitelist and a bounded five-page extraction limit. Chinese theses bypass the journal whitelist. It does not provide exhaustive CNKI retrieval or guaranteed 20-paper Chinese recall. The ranking configuration includes Chinese phrase variants and communication venue names; exact venue aliases and lexical coverage remain limitations.
 
 Both languages use the same selection/status/import/retry tools. Chinese bibliographic data retains `language=zh`, Chinese author names and thesis type when applicable; it is not replaced with Crossref metadata. CNKI downloads use the user's existing institutional access. File responses are retained under UUID filenames before browser download handling; PDF identity is checked against DOI or the compact Chinese title on the first page. CAJ and unverified files are retained and reported; they are not attached as verified PDFs. Blob/desktop-client download flows are unsupported. English OA/Sci-Hub policy does not apply to CNKI records.
 
-The bridge avoids upstream download/import cleanup, disables automatic browser installation/update, retains browser artifact directories and license-denial signals, and leaves license enforcement intact. Session directories, receipts and PDFs remain in `COMM_MCP_DATA_DIR/cnki-bridge` or the configured data directory; installation archives exclude them.
+The integrated browser module avoids upstream download/import cleanup, disables automatic browser installation/update, retains browser artifact directories and license-denial signals, and leaves license enforcement intact. Session directories, receipts and PDFs remain in `COMM_MCP_DATA_DIR/cnki` or the configured data directory; installation archives exclude them.
 
 ## Review, select, import
 
@@ -47,7 +47,7 @@ References: [Zotero local API](https://www.zotero.org/support/dev/web_api/v3/loc
 - Existing bibliographic fields are retained. Specified collections and tags are added; pass `tags=[]` for no added parent-item tags. New items are enriched from Crossref when possible and require authors, year and venue.
 - Before creating an item, a deterministic key is saved. Retries reconcile that key and the library before creating anything, including after a timeout that occurred after a successful write.
 - Zotero 10.0.3 has a confirmed local-API bug when creating objects with client-supplied keys (`primaryData` is not initialized). Only that specific error activates server-assigned keys, with a stable `dc:relation` reservation marker and write token. Subsequent attempts reconcile the marker before creating an object; successful responses checkpoint the assigned attachment key. New explicit keys use version 0 to require that the object does not already exist.
-- PDFs retain the existing first-page DOI/title check. Attachments are deduplicated by content hash and parent item. A conflicting existing attachment is not replaced. Local completion additionally reads the file location returned by Zotero and checks the actual stored bytes against the downloaded PDF. Web transport reports server metadata verification only.
+- PDFs retain the existing first-page DOI/title check. Attachments are deduplicated by file hash and parent item. Different downloaded bytes with identical extracted text can remain as separate PDF copies; this was observed in the integrated CNKI live test. A conflicting existing attachment is not replaced. Local completion additionally reads the file location returned by Zotero and checks the actual stored bytes against the downloaded PDF. Web transport reports server metadata verification only.
 - Bibliography and attachment checkpoints are separate. A PDF failure does not undo a successful bibliographic import. The workflow does not update the full-library semantic index.
 - Selection revisions, PDFs, receipts, lock files and test artifacts are retained. There is no automatic file deletion. A partial last JSON write can be recovered from an earlier snapshot; deterministic keys support subsequent reconciliation.
 
@@ -62,7 +62,7 @@ Complementary query phrases improve recall, but API source limits, missing abstr
 Set `PYTHONDONTWRITEBYTECODE=1`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` and `COMM_TEST_ARTIFACTS` to a writable retained-artifact directory. Then run:
 
 ```text
-python -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py -q
+python -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py -q
 ```
 
 The tests cover ranked retrieval, PDF validation, interrupted writes, repeated 20-paper ingestion, selective retries, collection/target consistency, DOI-less identity checks, the upload protocol, credential isolation and Windows encryption. These are simulated library writes; they do not establish that a real Zotero import has succeeded. A fresh stdio session validates tool registration separately. Actual library ingestion requires the user's native Zotero authorization and subsequent readback.

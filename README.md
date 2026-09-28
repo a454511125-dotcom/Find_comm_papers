@@ -4,11 +4,11 @@
 
 Bilingual literature discovery, communication-prioritized ranking, verified PDF retrieval, and resumable Zotero ingestion for computational communication research.
 
-当前源码版本：**0.3.1**。基于 [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp) 定制，保留 MIT 许可证。上游来源和改动范围见 [UPSTREAM.md](docs/UPSTREAM.md)。本仓库提供源码，不包含 Python 运行时、浏览器、账号授权、文献全文或个人文库数据。
+当前源码版本：**0.4.0**。将 [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp) 的英文功能与 [wuruiqi/cnki-mcp](https://github.com/wuruiqi/cnki-mcp) 的中文实现合入同一个 Python 项目、同一个 MCP 服务，保留两者的 MIT 许可证。上游来源和改动范围见 [UPSTREAM.md](docs/UPSTREAM.md)。本仓库提供源码，不包含 Python 运行时、浏览器、账号授权、文献全文或个人文库数据。
 
 ## 功能
 
-- **中英文联合检索**：中文通过兼容的本地 CNKI 后端；英文通过 OpenAlex、Crossref、arXiv、Semantic Scholar、dblp 等入口。
+- **中英文联合检索**：中文由包内 CNKI 模块直接操作浏览器；英文通过 OpenAlex、Crossref、arXiv、Semantic Scholar、dblp 等入口。
 - **传播学优先**：同时保留计算社会科学、计算机及 Nature、Science 等综合期刊中的相关研究。默认权重为主题相关性 65%、学科匹配 25%、时间 5%、引用量 5%。
 - **知网单关键词检索**：每次只提交一个关键词或概念，从 `https://www.cnki.net/` 首页提交检索，处理需要再次点击搜索按钮的情形。
 - **保留两种语言**：不跨语言去重；英文多源结果内部去重，Zotero 入库仍检查已有条目和附件。
@@ -22,7 +22,7 @@ Bilingual literature discovery, communication-prioritized ranking, verified PDF 
 
 - 完整流程已在 **Windows 11、Python 3.12、Zotero Desktop 10.0.3** 上验证。
 - Zotero 入库需要打开桌面客户端、启用本地 API，并完成本机写入授权。
-- 中文功能额外依赖已经安装、与桥接接口兼容的 CNKI MCP Python 环境及 CloakBrowser 可执行文件。它们不随本仓库提供。仅使用英文功能无需配置 CNKI。
+- 中英文使用同一个 Python 环境；`pip install` 同时安装 Playwright 和 CloakBrowser Python 依赖。中文需要已有的兼容 Chromium/CloakBrowser 浏览器可执行文件，由 `COMM_CNKI_BROWSER_PATH` 指定。无需安装或配置另一个 CNKI MCP。浏览器二进制不随源码分发，也不会由检索操作自动下载。
 - 英文功能可独立运行；其他操作系统上的完整流程未验证，持久化本机 Zotero 授权目前依赖 Windows DPAPI。
 
 ## 安装源码
@@ -50,23 +50,33 @@ args = ['-I', '-B', 'D:\Research\Find_comm_papers\launch.py']
 
 [mcp_servers.Find_comm_papers.env]
 COMM_MCP_DATA_DIR = 'D:\Research\FindPapersData'
+COMM_CNKI_BROWSER_PATH = 'D:\Browsers\CloakBrowser\chrome.exe'
 ```
 
-修改后重新加载 MCP 或重启客户端。对外注册名为 `Find_comm_papers`；为兼容现有调用，内部服务标识、授权应用名及 `comm_*` 工具名保留原名。
+修改后重新加载 MCP 或重启客户端。服务注册名及内部服务名称均为 `Find_comm_papers`；为兼容现有调用，`comm_*` 工具名保留不变。
 
 `COMM_MCP_DATA_DIR` 保存全文、下载记录、选文清单、浏览器诊断和加密授权，建议放在仓库外。通过 `launch.py` 启动且未指定时，默认使用用户目录下的 `Documents/FindPapersData`。
 
 可选 API 参数使用 `.env.example` 中的变量名。复制为本机私有环境文件后，用 `PAPER_SEARCH_MCP_ENV_FILE` 指定绝对路径；不要提交填写后的文件。直接用模块启动时，也应显式设置数据目录。
 
-### 中文后端
+### 合并后的结构
 
-桥接器读取 `~/.codex/config.toml` 中已有的 `[mcp_servers.cnki]`。也可通过 `COMM_CNKI_MCP_CONFIG` 指向另一份配置。要求该条目：
+```text
+Find_comm_papers（一个 MCP 服务、一个 Python 环境）
+├── 英文检索与开放全文模块
+├── 中文知网模块（内置原 CNKI 实现及既有修复）
+│   └── 共享浏览器会话
+└── 统一排序、选文、PDF 核验与 Zotero 入库
+```
 
-- `command` 指向已安装 CNKI 后端的 Python；`args` 为 `["-m", "server"]`。
-- 环境配置中的 `CLOAKBROWSER_BINARY_PATH` 指向已存在的浏览器文件。
-- 后端提供兼容的 `cnki.browser`、`cnki.search`、`cnki.download` 接口和所需依赖。
+中文检索直接调用包内 Python 函数。不会读取 `[mcp_servers.cnki]`，不会启动第二个 MCP，也不依赖旧 CNKI 的安装路径或 Python 环境。浏览器/Playwright 驱动是普通运行时组件。
 
-本项目调用兼容后端的内部接口，不能保证任意 CNKI MCP 实现均可替换。保留原后端配置并先单独验证其可用性。桥接器不会自动安装或更新浏览器；缺少中文依赖时返回中文来源错误，英文功能仍可使用。知网全文访问使用用户已有权限；登录或可操作的验证码仍可能需要人工处理。
+- `COMM_CNKI_BROWSER_PATH`：已有兼容浏览器可执行文件的绝对路径。启动前检查文件存在，防止隐式下载。
+- `COMM_CNKI_COOKIE_FILE`：可选，仅用于首次读取已有登录 Cookie；也可以直接在打开的浏览器里登录。不会覆盖该输入文件。
+- 当前服务保存自己的会话和 Cookie，均位于 `COMM_MCP_DATA_DIR/cnki`，不进入代码仓库。
+- 登录与可操作的验证码仍由用户处理；空白验证页面报告为加载问题。
+
+0.3.1 曾采用转调用旧 CNKI 环境的桥接方案，只实现统一入口。0.4.0 将中文代码直接合入，移除了这一运行依赖。
 
 ## 使用示例
 
@@ -111,7 +121,7 @@ COMM_MCP_DATA_DIR = 'D:\Research\FindPapersData'
 ## 配置与边界
 
 - 排序配置位于 `paper_search_mcp/comm_profile.json`；用 `COMM_MCP_PROFILE` 可指定外部配置。权重和期刊列表可编辑。
-- 中文期刊检索保留兼容后端的传播学期刊白名单，最多读取五页；不是全库穷尽检索。学位论文走单独的数据库类型。
+- 中文期刊检索保留原中文模块的传播学期刊白名单，最多读取五页；不是全库穷尽检索。学位论文走单独的数据库类型。
 - 默认最多返回候选数量，数据源错误、限流、缺少摘要或 OA 链接都会影响覆盖率。
 - 当前配置保留原定制版启用的 Sci-Hub 回退选项。仅使用开放获取和公开来源时，调用下载/入库时传 `use_scihub=false`，或把配置中的 `download.use_scihub` 改为 `false`。真实 Sci-Hub 全文下载未验证。
 - CAJ 文件保留但不会作为已核验 PDF 导入；Blob 或桌面下载器流程不受支持。
@@ -120,7 +130,11 @@ COMM_MCP_DATA_DIR = 'D:\Research\FindPapersData'
 
 ## 验证
 
-0.3.1 的 100 项重点回归测试已通过。真实流程各验证过一篇中文和英文文献：中文检索、PDF 身份核验、Zotero 新条目和附件核验通过；英文通过已知开放仓储 URL 获取新 PDF 并核验现有条目及附件。重复导入和重试未产生重复记录。这些结果不代表任意文献均可下载，也不代表批量真实入库已全面验证。
+0.4.0 的 **115 项回归测试通过**，其中 15 项专门检查没有嵌套 MCP、没有旧中文配置/环境依赖、共享浏览器会话、异常恢复和关闭行为。
+
+真实 MCP 测试中，禁止导入外部 `cnki` 包，并将旧中文配置路径指向不存在的文件；同一服务成功返回中英文结果、下载中文 PDF、核验标题并完成 Zotero 文献及实际附件核验。同一文件的重复导入、重试和新选文清单检查通过。
+
+已确认一个附件边界：知网不同时间下载的 PDF 可能字节不同而提取文本一致。当前按文件哈希检查附件，会保留这种不同字节的文件副本；测试样本因此在同一个文献条目下留下两份 PDF，并未新增文献条目。不会擅自删除或合并文件。先前英文样本验证过通过已知开放仓储 URL 获取新 PDF；这些单篇测试不代表任意文献均可下载或批量真实入库已全面验证。
 
 运行重点回归测试（保留全部测试产物，不写入实际 Zotero 文库）：
 
@@ -128,11 +142,11 @@ COMM_MCP_DATA_DIR = 'D:\Research\FindPapersData'
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
 $env:COMM_TEST_ARTIFACTS = Join-Path $PWD 'test-artifacts'
-.\.venv\Scripts\python.exe -B -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py -q
+.\.venv\Scripts\python.exe -B -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py -q
 ```
 
 Windows 加密测试需要当前账户可访问原生 DPAPI。上游测试集还包含网络测试；不要将其结果与上述重点回归混为一谈。
 
 ## 许可
 
-[MIT License](LICENSE)。保留上游 OPENAGS 版权和贡献来源。CNKI 后端、CloakBrowser、Zotero 及所访问内容分别适用各自的许可与访问条件。
+[MIT License](LICENSE)。保留上游 OPENAGS 版权和贡献来源。内置 CNKI 代码的 MIT 许可见 [CNKI-MCP-LICENSE](third_party/CNKI-MCP-LICENSE)。CloakBrowser、Zotero 及所访问内容分别适用各自的许可与访问条件。

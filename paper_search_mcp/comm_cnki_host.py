@@ -1,15 +1,22 @@
-"""Minimal CNKI host, executed by the existing CNKI environment; no import/batch cleanup."""
+"""CNKI runtime called directly inside the single Find_comm_papers process.
+
+The DOM helpers live in paper_search_mcp.cnki; this module has no MCP server,
+stdio client, or dependency on another CNKI installation. Browser imports are
+lazy so English discovery remains usable without a running browser.
+"""
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
-import os
 import re
-import sys
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from .cnki.browser import BrowserConfigurationError, BrowserSession
+from .cnki import download as cnki_download
+from .cnki import search as cnki_search
 
 CNKI_HOME = "https://www.cnki.net/"
 
@@ -132,214 +139,225 @@ class RetainedResponses:
             code = re.search(r"(?:net::)?ERR_[A-Z_]+|CERT_[A-Z_]+", str(exc))
             self.errors.append({"host": urlsplit(request.url).hostname,
                                 "error": code[0] if code else type(exc).__name__})
-            await route.abort()
+            with contextlib.suppress(Exception):
+                await route.abort()
 
 
-def main():
-    session_path = Path(os.environ["COMM_CNKI_SESSION"])
-    retain_license_signals(session_path)
-    from cnki import browser
-    from cnki import download as upstream_download
-    from cnki import search as upstream_search
-    from mcp.server.fastmcp import FastMCP
+class CNKIBackend:
+    """A provider owned by Find_comm_papers, called on its internal event loop."""
 
-    original_launch = browser._cloak_launch_persistent_context_async
-    if original_launch is None:
-        raise RuntimeError("The existing CloakBrowser environment is required")
-    async def launch(*args, **kwargs):
-        kwargs["accept_downloads"] = False
-        kwargs["service_workers"] = "block"
-        artifacts = session_path / "browser-artifacts"
-        artifacts.mkdir(parents=True, exist_ok=True)
-        kwargs["artifacts_dir"] = str(artifacts)
-        return await original_launch(*args, **kwargs)
-    browser._cloak_launch_persistent_context_async = launch
-    browser._USE_CLOAKBROWSER = True
-    retained = RetainedResponses(Path(os.environ["PDF_DIR"]))
-    active_context = None
-    pending_search = None
+    def __init__(self, session_path: Path, browser_binary: Path | None = None,
+                 seed_cookie_file: Path | None = None):
+        self.session_path = Path(session_path)
+        self.browser = BrowserSession(self.session_path, browser_binary, seed_cookie_file)
+        self.retained = RetainedResponses(self.session_path / "downloads")
+        self._active_context = None
+        self._pending_search = None
+        self._pending_download = None
 
-    async def requires_verification(page):
-        return await visible_challenge(page, [".tencent-captcha-dy__header-text",
-            ".tencent-captcha-dy__footer-title", *upstream_download._CAPTCHA_SELECTORS])
+    async def _requires_verification(self, page):
+        return await visible_challenge(page, [
+            ".tencent-captcha-dy__header-text", ".tencent-captcha-dy__footer-title",
+            *cnki_download._CAPTCHA_SELECTORS,
+        ])
 
-    async def context():
-        nonlocal active_context
-        ctx = await browser.get_context()
-        if ctx is not active_context:
-            await ctx.route("**/*", retained.route)
-            active_context = ctx
+    async def _context(self):
+        ctx = await self.browser.get_context()
+        if ctx is not self._active_context:
+            await ctx.route("**/*", self.retained.route)
+            self._active_context = ctx
+
             def closed(*_):
-                nonlocal active_context, pending_search
-                if active_context is ctx:
-                    active_context = None
-                    pending_search = None
-                if browser._context is ctx:
-                    browser._context = None
+                if self._active_context is ctx:
+                    self._active_context = None
+                    self._pending_search = None
+                    self._pending_download = None
+
             ctx.on("close", closed)
-            # Seed once, so a manual login/verification is not overwritten by older cookies.
-            cookies_path = os.environ.get("COMM_CNKI_ORIGINAL_COOKIES")
-            if cookies_path and Path(cookies_path).is_file():
-                await ctx.add_cookies(json.loads(Path(cookies_path).read_text(encoding="utf-8")))
         return ctx
 
-    @contextlib.asynccontextmanager
-    async def lifespan(_):
-        try:
-            yield {}
-        finally:
-            await browser.close_context()
+    async def close(self):
+        await self.browser.close()
+        self._active_context = None
+        self._pending_search = None
+        self._pending_download = None
 
-    mcp = FastMCP("comm_cnki_backend", lifespan=lifespan)
+    async def _verification_result(self, page, stage):
+        """Preserve visible evidence and distinguish an empty challenge page."""
+        await page.bring_to_front()
+        prefix = self.session_path / (stage + "-verification-" + uuid.uuid4().hex)
+        with prefix.with_suffix(".html").open("x", encoding="utf-8") as stream:
+            stream.write(await page.content())
+        await page.screenshot(path=str(prefix.with_suffix(".png")))
+        body_text = await page.locator("body").inner_text()
+        blank = len(body_text.strip()) < 20
+        return {
+            "success": False, "captcha": not blank, "blank_verification_page": blank,
+            "message": "知网返回空白验证页，需要检查访问会话或页面加载" if blank
+                       else "请在知网浏览器中手动完成验证后重试",
+            "diagnostic_snapshot": str(prefix.with_suffix(".html")),
+            "screenshot": str(prefix.with_suffix(".png")), "page_title": await page.title(),
+        }
 
-    @mcp.tool()
-    async def cnki_search(query: str, year_start: int, year_end: int, max_results: int, db_code: str = "CJFD") -> dict:
-        nonlocal pending_search
+    async def search(self, query: str, year_start: int, year_end: int, max_results: int, db_code: str = "CJFD") -> dict:
         query = single_keyword(query)
+        if year_start > year_end or max_results < 1:
+            raise ValueError("Expected a valid year range and positive max_results")
+        if db_code not in {"CJFD", "CDFD", "CMFD"}:
+            raise ValueError("db_code must be CJFD, CDFD, or CMFD")
         page, keep_open = None, False
         try:
-            with contextlib.redirect_stdout(sys.stderr):
-                ctx = await context()
-                retained.errors.clear()
-                if pending_search and pending_search[1] == query and not pending_search[0].is_closed():
-                    page, submitted = pending_search[0], True
-                else:
-                    page = await ctx.new_page()
-                    await page.goto(CNKI_HOME, wait_until="domcontentloaded", timeout=25000)
-                    await page.wait_for_timeout(3500)
-                    home_page = page
-                    page, submitted = await submit_homepage(page, ctx, query)
-                    if page is not home_page:
-                        await home_page.close()
-                reached = False
-                if submitted:
-                    for _ in range(5):
-                        for marker in upstream_search._RESULT_MARKERS:
-                            if await page.locator(marker).count():
-                                reached = True
-                                break
-                        if reached or await requires_verification(page):
+            ctx = await self._context()
+            self.retained.errors.clear()
+            if self._pending_search and self._pending_search[1] == query and not self._pending_search[0].is_closed():
+                page, submitted = self._pending_search[0], True
+            else:
+                page = await ctx.new_page()
+                await page.goto(CNKI_HOME, wait_until="domcontentloaded", timeout=25000)
+                await page.wait_for_timeout(3500)
+                home_page = page
+                page, submitted = await submit_homepage(page, ctx, query)
+                if page is not home_page:
+                    await home_page.close()
+            reached = False
+            if submitted:
+                for _ in range(5):
+                    for marker in cnki_search._RESULT_MARKERS:
+                        if await page.locator(marker).count():
+                            reached = True
                             break
-                        await page.wait_for_timeout(1000)
-                # The current homepage can open /search with a prefilled keyword
-                # without issuing a result request. Submit the actual search-page form once.
-                if not reached and not await requires_verification(page) and await page.locator("input#txt_search").count():
-                    reached = await upstream_search._fill_and_search(page, query)
-                if not reached:
-                    captcha = await requires_verification(page)
-                    keep_open = True
-                    pending_search = (page, query)
-                    snapshot = session_path / ("search-page-" + uuid.uuid4().hex + ".html")
-                    with snapshot.open("x", encoding="utf-8") as stream:
-                        stream.write(await page.content())
-                    return {"success": False, "papers": [], "captcha": captcha,
-                            "message": "知网未识别到结果表格；" + ("请在打开的浏览器手动完成验证后重试" if captcha else "已保留当前页面，请检查登录或页面加载情况"),
-                            "network_diagnostics": retained.errors[-5:], "page_title": (await page.title())[:120],
-                            "diagnostic_snapshot": str(snapshot)}
-                await upstream_search._restrict_to_db(page, db_code)
-                sort = page.locator("#orderList #FFD")
-                relevance_sorted = False
-                if await sort.count() and await sort.is_visible():
-                    await sort.click(timeout=15000)
-                    await page.wait_for_timeout(4500)
-                    relevance_sorted = True
-                pending_search = None
-                raw, papers, in_years, pages_read = [], [], 0, 0
-                previous = None
-                for page_index in range(5):
-                    current = []
-                    for _ in range(10):
-                        current = await upstream_search._extract_rows(page, 200)
-                        signature = tuple(p["title"] for p in current)
-                        if current and signature != previous:
-                            break
-                        await page.wait_for_timeout(1000)
-                    if not current or signature == previous:
+                    if reached or await self._requires_verification(page):
                         break
-                    previous = signature
-                    pages_read += 1
-                    raw.extend(current)
-                    eligible = upstream_search._filter_by_year(current, year_start, year_end, len(current) + 1)
-                    in_years += len(eligible)
-                    if db_code == "CJFD":
-                        eligible = upstream_search._filter_by_journal(eligible)
-                    papers.extend(eligible)
-                    if len(papers) >= max_results or page_index == 4:
+                    await page.wait_for_timeout(1000)
+            # The current homepage can open /search with a prefilled keyword
+            # without issuing a result request. Submit the actual search-page form once.
+            if not reached and not await self._requires_verification(page) and await page.locator("input#txt_search").count():
+                reached = await cnki_search._fill_and_search(page, query)
+            if not reached:
+                captcha = await self._requires_verification(page)
+                keep_open = True
+                self._pending_search = (page, query)
+                if captcha:
+                    return {**await self._verification_result(page, "search"), "papers": [],
+                            "network_diagnostics": self.retained.errors[-5:]}
+                snapshot = self.session_path / ("search-page-" + uuid.uuid4().hex + ".html")
+                with snapshot.open("x", encoding="utf-8") as stream:
+                    stream.write(await page.content())
+                return {"success": False, "papers": [], "captcha": captcha,
+                        "message": "知网未识别到结果表格；" + ("请在打开的浏览器手动完成验证后重试" if captcha else "已保留当前页面，请检查登录或页面加载情况"),
+                        "network_diagnostics": self.retained.errors[-5:], "page_title": (await page.title())[:120],
+                        "diagnostic_snapshot": str(snapshot)}
+            await cnki_search._restrict_to_db(page, db_code)
+            sort = page.locator("#orderList #FFD")
+            relevance_sorted = False
+            if await sort.count() and await sort.is_visible():
+                await sort.click(timeout=15000)
+                await page.wait_for_timeout(4500)
+                relevance_sorted = True
+            self._pending_search = None
+            raw, papers, in_years, pages_read = [], [], 0, 0
+            previous = None
+            for page_index in range(5):
+                current = []
+                for _ in range(10):
+                    current = await cnki_search._extract_rows(page, 200)
+                    signature = tuple(p["title"] for p in current)
+                    if current and signature != previous:
                         break
-                    next_page = page.locator("#PageNext")
-                    if not await next_page.count() or not await next_page.is_visible():
-                        break
-                    await next_page.click(timeout=15000)
-                    await page.wait_for_timeout(1500)
-                papers = papers[:max_results]
-                for paper in papers:
+                    await page.wait_for_timeout(1000)
+                if not current or signature == previous:
+                    break
+                previous = signature
+                pages_read += 1
+                raw.extend(current)
+                eligible = cnki_search._filter_by_year(current, year_start, year_end, len(current) + 1)
+                in_years += len(eligible)
+                if db_code == "CJFD":
+                    eligible = cnki_search._filter_by_journal(eligible)
+                for paper in eligible:
                     paper["extra"] = {**paper.get("extra", {}), "cnki_referer": page.url}
-                if not papers:
-                    snapshot = session_path / ("empty-results-" + uuid.uuid4().hex + ".html")
-                    with snapshot.open("x", encoding="utf-8") as stream:
-                        stream.write(await page.content())
-                return {"success": True, "papers": papers, "count": len(papers),
-                        "diagnostics": {"extracted":len(raw), "within_years":in_years,
-                            "retained":len(papers), "relevance_sorted":relevance_sorted,
-                            "pages_read":pages_read, "page_limit":5,
-                            "snapshot":str(snapshot) if not papers else None},
-                        "message": "期刊检索沿用知网传播学白名单；按相关度最多读取5页，未满额不表示没有其他相关文献。"}
+                papers.extend(eligible)
+                if len(papers) >= max_results or page_index == 4:
+                    break
+                next_page = page.locator("#PageNext")
+                if not await next_page.count() or not await next_page.is_visible():
+                    break
+                await next_page.click(timeout=15000)
+                await page.wait_for_timeout(1500)
+            papers = papers[:max_results]
+            if not papers:
+                snapshot = self.session_path / ("empty-results-" + uuid.uuid4().hex + ".html")
+                with snapshot.open("x", encoding="utf-8") as stream:
+                    stream.write(await page.content())
+            return {"success": True, "papers": papers, "count": len(papers),
+                    "diagnostics": {"extracted":len(raw), "within_years":in_years,
+                        "retained":len(papers), "relevance_sorted":relevance_sorted,
+                        "pages_read":pages_read, "page_limit":5,
+                        "snapshot":str(snapshot) if not papers else None},
+                    "message": "期刊检索沿用知网传播学白名单；按相关度最多读取5页，未满额不表示没有其他相关文献。"}
+        except BrowserConfigurationError as exc:
+            return {"success": False, "papers": [], "message": str(exc)}
         except Exception as exc:
             code = re.search(r"(?:net::)?ERR_[A-Z_]+|CERT_[A-Z_]+", str(exc))
             return {"success": False, "papers": [], "message": "CNKI search failed: " + (code[0] if code else type(exc).__name__),
-                    "network_diagnostics": retained.errors[-5:]}
+                    "network_diagnostics": self.retained.errors[-5:]}
         finally:
+            with contextlib.suppress(Exception):
+                await self.browser.save_cookies()
             if page is not None and not keep_open:
-                await page.close()
+                with contextlib.suppress(Exception):
+                    await page.close()
 
-    @mcp.tool()
-    async def cnki_download(detail_url: str, title: str, referer: str = "") -> dict:
+
+    async def download(self, detail_url: str, title: str, referer: str = "") -> dict:
         host = (urlsplit(detail_url).hostname or "").lower()
         if urlsplit(detail_url).scheme not in {"http", "https"} or not (host == "cnki.net" or host.endswith(".cnki.net") or host.endswith(".cnki.com.cn")):
             return {"success": False, "message": "Expected a CNKI detail URL"}
-        if referer and (urlsplit(referer).scheme not in {"http", "https"} or not (urlsplit(referer).hostname or "").endswith(".cnki.net")):
+        referer_host = (urlsplit(referer).hostname or "").lower()
+        if referer and (urlsplit(referer).scheme not in {"http", "https"} or not (referer_host == "cnki.net" or referer_host.endswith(".cnki.net"))):
             return {"success": False, "message": "Expected a CNKI source page"}
-        ctx = await context()
-        page = await ctx.new_page()
+        page = None
         keep_open = False
-        retained.files.clear()  # Memory only; retained files are never removed.
-        retained.arrived.clear()
+        self.retained.files.clear()  # Memory only; retained files are never removed.
+        self.retained.arrived.clear()
         try:
-            await page.goto(detail_url, referer=referer or CNKI_HOME, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(2000)
-            if await requires_verification(page):
+            ctx = await self._context()
+            if self._pending_download and self._pending_download[1] == detail_url and not self._pending_download[0].is_closed():
+                page = self._pending_download[0]
+            else:
+                page = await ctx.new_page()
+                await page.goto(detail_url, referer=referer or CNKI_HOME, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2000)
+            if await self._requires_verification(page):
                 keep_open = True
-                await page.bring_to_front()
-                prefix = session_path / ("download-verification-" + uuid.uuid4().hex)
-                with prefix.with_suffix(".html").open("x", encoding="utf-8") as stream:
-                    stream.write(await page.content())
-                await page.screenshot(path=str(prefix.with_suffix(".png")))
-                body_text = await page.locator("body").inner_text()
-                blank = len(body_text.strip()) < 20
-                return {"success": False, "captcha": not blank, "blank_verification_page": blank,
-                        "message": "知网返回空白验证页，需要检查访问会话或页面加载" if blank else "请在知网浏览器中手动完成验证后重试",
-                        "diagnostic_snapshot":str(prefix.with_suffix(".html")), "screenshot":str(prefix.with_suffix(".png")),
-                        "page_title":await page.title()}
-            button, _ = await upstream_download._find_download_btn(page)
+                self._pending_download = (page, detail_url)
+                return await self._verification_result(page, "download")
+            self._pending_download = None
+            button, _ = await cnki_download._find_download_btn(page)
             if button is None:
                 return {"success": False, "message": "未找到全文下载按钮；请检查机构登录及全文权限"}
             try:
                 await button.click(timeout=20000)
             except Exception:
-                if not retained.arrived.is_set():
+                if not self.retained.arrived.is_set():
                     raise
-            await asyncio.wait_for(retained.arrived.wait(), timeout=50)
-            return retained.files[-1]
+            await asyncio.wait_for(self.retained.arrived.wait(), timeout=50)
+            return self.retained.files[-1]
+        except BrowserConfigurationError as exc:
+            return {"success": False, "message": str(exc)}
         except Exception as exc:
-            keep_open = await requires_verification(page)
+            if page is not None:
+                with contextlib.suppress(Exception):
+                    keep_open = await self._requires_verification(page)
+            if keep_open:
+                self._pending_download = (page, detail_url)
+                return await self._verification_result(page, "download")
             return {"success": False, "captcha": keep_open,
                     "message": "CNKI response retrieval failed: " + type(exc).__name__}
         finally:
-            if not keep_open:
-                await page.close()
+            with contextlib.suppress(Exception):
+                await self.browser.save_cookies()
+            if page is not None and not keep_open:
+                with contextlib.suppress(Exception):
+                    await page.close()
 
-    mcp.run(transport="stdio")
-
-
-if __name__ == "__main__":
-    main()

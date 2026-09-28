@@ -69,7 +69,7 @@ def authorize():
     with requests.Session() as session:
         session.trust_env = False
         response = session.post("http://127.0.0.1:23119/api/local/authorize",
-                                json={"appName": "comm_papers"}, headers={"Zotero-Server-ID": state["server_id"]}, timeout=55)
+                                json={"appName": "Find_comm_papers"}, headers={"Zotero-Server-ID": state["server_id"]}, timeout=55)
     if response.status_code != 200:
         return {"status": "not_authorized", "http_status": response.status_code}
     result = response.json()

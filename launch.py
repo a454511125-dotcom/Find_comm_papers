@@ -15,7 +15,7 @@ from paper_search_mcp import comm_server
 
 if "--self-check" in sys.argv:
     tools = asyncio.run(comm_server.mcp.list_tools())
-    print(json.dumps({"name":"Find_comm_papers", "version":"0.3.1",
+    print(json.dumps({"name":"Find_comm_papers", "version":"0.4.0",
                       "tool_count":len(tools), "tools":sorted(t.name for t in tools)}, ensure_ascii=False))
 else:
     comm_server.main()
