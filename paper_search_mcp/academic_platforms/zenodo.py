@@ -8,6 +8,7 @@ API docs: https://developers.zenodo.org/
 """
 
 from __future__ import annotations
+from .retained import retained_open as open, safe_filename
 
 import logging
 from datetime import datetime

@@ -704,15 +704,15 @@ if __name__ == "__main__":
     else:
         query = "climate change"
 
-    print(f"Searching OpenAIRE for: {query}")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     papers = searcher.search(query, max_results=5)
 
-    print(f"Found {len(papers)} papers:")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     for i, paper in enumerate(papers):
-        print(f"\n{i+1}. {paper.title}")
-        print(f"   Authors: {', '.join(paper.authors[:3])}{'...' if len(paper.authors) > 3 else ''}")
-        print(f"   DOI: {paper.doi}")
-        print(f"   Year: {paper.published_date.year if paper.published_date else 'N/A'}")
-        print(f"   Open Access: {paper.extra.get('open_access', 'N/A')}")
-        print(f"   Publisher: {paper.extra.get('publisher', 'N/A')}")
-        print(f"   URL: {paper.url}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

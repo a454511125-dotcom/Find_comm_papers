@@ -47,5 +47,5 @@
     "computational_social_science": ["computational social science", "computational sociology", "social network analysis", "collective behavior", "collective behaviour", "social contagion", "online communities", "digital trace", "social computing", "human behavior", "human behaviour"],
     "computer_science": ["computer science", "cs.CL", "cs.SI", "cs.CY", "cs.HC", "cs.IR", "cs.LG", "natural language processing", "large language model", "text classification", "multimodal", "machine learning", "causal inference"]
   },
-  "download": {"use_scihub": true, "scihub_base_url": "https://www.sci-hub.st", "max_pdf_mb": 50, "timeout_seconds": 25, "total_timeout_seconds": 90, "batch_limit": 10}
+  "download": {"browser_fallback": true, "use_scihub": true, "scihub_base_url": "https://www.sci-hub.st", "max_pdf_mb": 50, "timeout_seconds": 25, "total_timeout_seconds": 90, "batch_limit": 10}
 }

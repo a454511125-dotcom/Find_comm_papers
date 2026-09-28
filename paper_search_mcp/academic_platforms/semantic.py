@@ -1,3 +1,4 @@
+from .retained import retained_open as open, safe_filename
 from typing import List, Optional
 from datetime import datetime
 import os
@@ -405,7 +406,7 @@ class SemanticSearcher(PaperSource):
             # Create download directory if it doesn't exist
             os.makedirs(save_path, exist_ok=True)
 
-            filename = f"semantic_{paper_id.replace('/', '_')}.pdf"
+            filename = f"semantic_{safe_filename(paper_id)}.pdf"
             pdf_path = os.path.join(save_path, filename)
 
             with open(pdf_path, "wb") as f:
@@ -436,7 +437,7 @@ class SemanticSearcher(PaperSource):
         """
         try:
             os.makedirs(save_path, exist_ok=True)
-            filename = f"semantic_{paper_id.replace('/', '_')}.pdf"
+            filename = f"semantic_{safe_filename(paper_id)}.pdf"
             pdf_path = os.path.join(save_path, filename)
 
             if not os.path.exists(pdf_path):
@@ -559,51 +560,51 @@ if __name__ == "__main__":
     # Test Semantic searcher
     searcher = SemanticSearcher()
 
-    print("Testing Semantic search functionality...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "secret sharing"
     max_results = 2
 
-    print("\n" + "=" * 60)
-    print("1. Testing search with detailed information")
-    print("=" * 60)
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     try:
         papers = searcher.search(query, year=None, max_results=max_results)
-        print(f"\nFound {len(papers)} papers for query '{query}' (with details):")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers, 1):
-            print(f"\n{i}. {paper.title}")
-            print(f"   Paper ID: {paper.paper_id}")
-            print(f"   Authors: {', '.join(paper.authors)}")
-            print(f"   Categories: {', '.join(paper.categories)}")
-            print(f"   URL: {paper.url}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if paper.pdf_url:
-                print(f"   PDF: {paper.pdf_url}")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if paper.published_date:
-                print(f"   Published Date: {paper.published_date}")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if paper.abstract:
-                print(f"   Abstract: {paper.abstract[:200]}...")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error during detailed search: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
-    print("\n" + "=" * 60)
-    print("2. Testing manual paper details fetching")
-    print("=" * 60)
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     test_paper_id = "5bbfdf2e62f0508c65ba6de9c72fe2066fd98138"
     try:
         paper_details = searcher.get_paper_details(test_paper_id)
         if paper_details:
-            print(f"\nManual fetch for paper {test_paper_id}:")
-            print(f"Title: {paper_details.title}")
-            print(f"Authors: {', '.join(paper_details.authors)}")
-            print(f"Categories: {', '.join(paper_details.categories)}")
-            print(f"URL: {paper_details.url}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if paper_details.pdf_url:
-                print(f"PDF: {paper_details.pdf_url}")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if paper_details.published_date:
-                print(f"Published Date: {paper_details.published_date}")
-            print(f"DOI: {paper_details.doi}")
-            print(f"Citations: {paper_details.citations}")
-            print(f"Abstract: {paper_details.abstract[:200]}...")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         else:
-            print(f"Could not fetch details for paper {test_paper_id}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error fetching paper details: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

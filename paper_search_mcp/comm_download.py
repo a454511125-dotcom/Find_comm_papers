@@ -173,15 +173,39 @@ def download_one(record: dict, use_scihub: bool | None = None) -> dict:
     use_scihub = settings["use_scihub"] if use_scihub is None else use_scihub
     timeout = min(60, max(5, float(settings["timeout_seconds"])))
     maximum = min(100, max(1, float(settings["max_pdf_mb"]))) * 1024 * 1024
-    attempts, seen = [], set()
+    attempts, seen, browser_candidates = [], set(), []
     root = data_dir()
-    deadline = time.monotonic() + min(180, max(20, float(settings.get("total_timeout_seconds", 90))))
+    total_budget = min(180, max(20, float(settings.get("total_timeout_seconds", 90))))
+    deadline = time.monotonic() + total_budget
+    browser_enabled = os.environ.get("COMM_BROWSER_FALLBACK", "1") != "0" and settings.get("browser_fallback", True)
+    browser_budget = min(30, total_budget * 0.4) if browser_enabled else 0
+    http_deadline = deadline - browser_budget
 
     def remaining():
-        left = deadline - time.monotonic()
+        left = http_deadline - time.monotonic()
         if left <= 0:
             raise TimeoutError("Per-paper retrieval budget exceeded")
         return min(timeout, left)
+
+    def save_verified(body, location, source, candidate):
+        valid, evidence = verify_pdf(body, paper)
+        if not valid:
+            attempts.append({"source": source, "status": evidence})
+            return None
+        stem = re.sub(r"[^\w.-]+", "_", paper["title"], flags=re.UNICODE).strip("_.")[:70] or "paper"
+        output = root / f"{stem}_{uuid.uuid4().hex[:12]}.pdf"
+        with output.open("xb") as f:
+            f.write(body)
+        receipt = {"status": "downloaded", "pdf_path": str(output), "source": source,
+                   "download_url": location, "identity_check": evidence,
+                   "version": candidate.get("version", "unknown"), "license": candidate.get("license"),
+                   "paper": paper, "attempts": attempts}
+        try:
+            with output.with_suffix(".json").open("x", encoding="utf-8") as stream:
+                json.dump(receipt, stream, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            receipt["receipt_error"] = safe_error(exc)
+        return receipt
 
     def attempt(candidate):
         url = candidate.get("url")
@@ -189,6 +213,9 @@ def download_one(record: dict, use_scihub: bool | None = None) -> dict:
             return None
         seen.add(url)
         source = candidate["source"]
+        # Browser sessions never receive API credentials or Sci-Hub candidates.
+        if browser_enabled and source != "scihub" and not candidate.get("headers"):
+            browser_candidates.append(candidate)
         try:
             content, final_url, _ = fetch_bytes(url, int(maximum), remaining(), candidate.get("headers"))
             possibilities = [(content, final_url)]
@@ -204,24 +231,9 @@ def download_one(record: dict, use_scihub: bool | None = None) -> dict:
                     except Exception as exc:
                         attempts.append({"source": source, "status": safe_error(exc)})
             for body, location in possibilities:
-                valid, evidence = verify_pdf(body, paper)
-                if not valid:
-                    attempts.append({"source": source, "status": evidence})
-                    continue
-                # UUID + exclusive creation: never overwrite or delete existing files.
-                stem = re.sub(r"[^\w.-]+", "_", paper["title"], flags=re.UNICODE).strip("_.")[:70] or "paper"
-                output = root / f"{stem}_{uuid.uuid4().hex[:12]}.pdf"
-                with output.open("xb") as f:
-                    f.write(body)
-                receipt = {"status": "downloaded", "pdf_path": str(output), "source": source,
-                           "download_url": location, "identity_check": evidence,
-                           "version": candidate.get("version", "unknown"), "license": candidate.get("license"),
-                           "paper": paper, "attempts": attempts}
-                try:
-                    output.with_suffix(".json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
-                except Exception as exc:
-                    receipt["receipt_error"] = safe_error(exc)
-                return receipt
+                receipt = save_verified(body, location, source, candidate)
+                if receipt:
+                    return receipt
             attempts.append({"source": source, "status": "no_verified_pdf"})
         except Exception as exc:
             attempts.append({"source": source, "status": safe_error(exc)})
@@ -266,6 +278,29 @@ def download_one(record: dict, use_scihub: bool | None = None) -> dict:
         else:
             attempts.append({"source": "unpaywall", "status": "email_not_configured"})
 
+    if browser_enabled and browser_candidates and time.monotonic() < deadline:
+        from .comm_browser import fetch_browser_pdf
+        # Try OA repository locations first, then the record's own landing page.
+        ordered = sorted(browser_candidates, key=lambda c: c["source"] not in {"openalex_oa", "unpaywall"})
+        for candidate in ordered[:2]:
+            left = deadline - time.monotonic()
+            if left <= 1:
+                break
+            try:
+                result = fetch_browser_pdf(candidate["url"], paper, timeout=min(browser_budget, left), max_bytes=int(maximum))
+                if result.get("status") == "downloaded":
+                    receipt = save_verified(result["content"], result["final_url"], "headless_browser", candidate)
+                    if receipt:
+                        return receipt
+                attempts.append({"source": "headless_browser", "status": result.get("status", "failed"),
+                                 **{k: result[k] for k in ("reason", "diagnostic_snapshot", "screenshot") if k in result}})
+                if result.get("reason") in {"browser_not_configured", "browser_missing", "browser_busy"}:
+                    break
+            except Exception as exc:
+                attempts.append({"source": "headless_browser", "status": safe_error(exc)})
+
+    # Unused browser time remains available to the explicitly enabled last fallback.
+    http_deadline = deadline
     if use_scihub and paper["doi"]:
         base = settings["scihub_base_url"].rstrip("/")
         try:

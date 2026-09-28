@@ -229,7 +229,12 @@ def test_openalex_retains_venue_and_oa_locations():
 def test_receipt_error_does_not_hide_download_success(monkeypatch, tmp_path):
     monkeypatch.setenv("COMM_MCP_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(dl, "fetch_bytes", lambda url, *args: (pdf_bytes("Social media misinformation diffusion"), url, "application/pdf"))
-    monkeypatch.setattr(Path, "write_text", Mock(side_effect=OSError("disk full")))
+    original_open = Path.open
+    def fail_receipt(path, *args, **kwargs):
+        if path.suffix == ".json" and path.is_relative_to(tmp_path):
+            raise OSError("disk full")
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", fail_receipt)
     result = dl.download_one(paper(pdf_url="https://example.org/p.pdf"), False)
     assert result["status"] == "downloaded"
     assert result["receipt_error"] == "OSError"

@@ -6,6 +6,7 @@ access to high quality, open access, peer-reviewed journals.
 
 API Documentation: https://doaj.org/api/v2
 """
+from .retained import retained_open as open, safe_filename
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -403,7 +404,7 @@ class DOAJSearcher(PaperSource):
         os.makedirs(save_path, exist_ok=True)
 
         # Create safe filename
-        safe_id = paper_id.replace('/', '_').replace(':', '_')
+        safe_id = safe_filename(paper_id).replace(':', '_')
         filename = f"doaj_{safe_id}.pdf"
         output_file = os.path.join(save_path, filename)
 
@@ -455,7 +456,7 @@ if __name__ == "__main__":
     searcher = DOAJSearcher()
 
     # Test search
-    print("Testing DOAJ search...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     test_queries = [
         "machine learning",
         "open access",
@@ -463,14 +464,14 @@ if __name__ == "__main__":
     ]
 
     for query in test_queries[:1]:  # Test first query only
-        print(f"\nSearching DOAJ for: '{query}'")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         papers = searcher.search(query, max_results=3)
-        print(f"Found {len(papers)} papers")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers):
-            print(f"{i+1}. {paper.title}")
-            print(f"   Authors: {', '.join(paper.authors[:3])}")
-            print(f"   Journal: {paper.extra.get('journal', 'Unknown')}")
-            print(f"   Year: {paper.published_date.year if paper.published_date else 'Unknown'}")
-            print(f"   DOI: {paper.doi}")
-            print(f"   PDF: {'Yes' if paper.pdf_url else 'No'}")
-            print()
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

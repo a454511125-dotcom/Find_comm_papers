@@ -1,11 +1,13 @@
+from .academic_platforms.retained import retained_open as open, safe_filename
 # paper_search_mcp/server.py
 import argparse
 import asyncio
+import contextvars
 import io
 import logging
 import os
 import re
-import tempfile
+import uuid
 import threading
 import time
 import unicodedata
@@ -72,7 +74,7 @@ class _BoundedSearchExecutor:
             )
 
         try:
-            future = self._executor.submit(function, *args, **kwargs)
+            future = self._executor.submit(contextvars.copy_context().run, function, *args, **kwargs)
         except BaseException:
             self._slots.release()
             raise
@@ -255,65 +257,26 @@ async def _download_from_url(
     if not pdf_url:
         return None
 
-    output_name = f"{_safe_filename(filename_hint)}.pdf"
+    from .comm_download import fetch_bytes
+    output_name = f"{_safe_filename(filename_hint)}_{uuid.uuid4().hex}.pdf"
     output_path = os.path.join(save_path, output_name)
-    temporary_path = ""
-
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            response = await client.get(pdf_url)
-
-        if response.status_code >= 400 or not response.content:
-            return None
-
-        content = bytes(response.content)
-        content_type = (response.headers.get("content-type") or "").lower()
+        content, _, _ = await asyncio.to_thread(fetch_bytes, pdf_url, 50 * 1024 * 1024, 30)
         if not _looks_like_pdf(content):
-            logger.warning(
-                "Resolved URL did not return PDF bytes: %s (content-type=%s)",
-                pdf_url,
-                content_type,
-            )
             return None
-
-        if expected_title or expected_doi:
-            matches = await asyncio.to_thread(
-                _pdf_matches_expected,
-                content,
-                expected_title,
-                expected_doi,
-            )
-            if not matches:
-                logger.warning(
-                    "Downloaded PDF from %s could not be verified as title=%r DOI=%r",
-                    pdf_url,
-                    expected_title[:120],
-                    expected_doi,
-                )
-                return None
-
         os.makedirs(save_path, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            prefix=f".{output_name}.",
-            suffix=".part",
-            dir=save_path,
-            delete=False,
-        ) as file_obj:
-            temporary_path = file_obj.name
+        # Keep received PDFs even when identity verification fails.
+        with open(output_path, "xb") as file_obj:
             file_obj.write(content)
-        os.replace(temporary_path, output_path)
-        temporary_path = ""
+        if (expected_title or expected_doi) and not await asyncio.to_thread(
+            _pdf_matches_expected, content, expected_title, expected_doi
+        ):
+            logger.warning("Unverified PDF retained at %s", output_path)
+            return None
         return output_path
     except Exception as exc:
-        logger.warning("Direct URL download failed for %s: %s", pdf_url, exc)
+        logger.warning("Direct URL download failed (%s); partial files are retained", type(exc).__name__)
         return None
-    finally:
-        if temporary_path:
-            try:
-                os.remove(temporary_path)
-            except OSError:
-                pass
 
 
 def _looks_like_pdf(content: bytes) -> bool:
@@ -848,7 +811,7 @@ async def read_arxiv_paper(paper_id: str, save_path: str = "./downloads") -> str
     try:
         return arxiv_searcher.read_paper(paper_id, save_path)
     except Exception as e:
-        print(f"Error reading paper {paper_id}: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return ""
 
 
@@ -878,7 +841,7 @@ async def read_biorxiv_paper(paper_id: str, save_path: str = "./downloads") -> s
     try:
         return biorxiv_searcher.read_paper(paper_id, save_path)
     except Exception as e:
-        print(f"Error reading paper {paper_id}: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return ""
 
 
@@ -895,7 +858,7 @@ async def read_medrxiv_paper(paper_id: str, save_path: str = "./downloads") -> s
     try:
         return medrxiv_searcher.read_paper(paper_id, save_path)
     except Exception as e:
-        print(f"Error reading paper {paper_id}: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return ""
 
 
@@ -912,7 +875,7 @@ async def read_iacr_paper(paper_id: str, save_path: str = "./downloads") -> str:
     try:
         return iacr_searcher.read_paper(paper_id, save_path)
     except Exception as e:
-        print(f"Error reading paper {paper_id}: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return ""
 
 
@@ -976,7 +939,7 @@ async def read_semantic_paper(paper_id: str, save_path: str = "./downloads") -> 
     try:
         return semantic_searcher.read_paper(paper_id, save_path)
     except Exception as e:
-        print(f"Error reading paper {paper_id}: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return ""
 
 
@@ -1176,14 +1139,8 @@ async def download_with_fallback(
         attempt_errors.append(
             "scihub: downloaded PDF content did not match the requested paper"
         )
-        try:
-            os.remove(fallback_result)
-        except OSError as exc:
-            logger.warning(
-                "Could not remove unverified Sci-Hub download %s: %s",
-                fallback_result,
-                exc,
-            )
+        logger.warning("Unverified Sci-Hub PDF retained at %s", fallback_result)
+
 
     return "Download failed after OA fallback chain and Sci-Hub fallback. Details: " + " | ".join(attempt_errors)
 

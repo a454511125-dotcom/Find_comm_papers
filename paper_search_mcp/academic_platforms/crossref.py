@@ -329,52 +329,52 @@ if __name__ == "__main__":
     
     # Test search functionality
     # 测试搜索功能
-    print("Testing search functionality...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "machine learning"
     max_results = 5
     papers = []
     try:
         papers = searcher.search(query, max_results=max_results)
-        print(f"Found {len(papers)} papers for query '{query}':")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers, 1):
-            print(f"{i}. {paper.title} (DOI: {paper.doi})")
-            print(f"   Authors: {', '.join(paper.authors[:3])}{'...' if len(paper.authors) > 3 else ''}")
-            print(f"   Published: {paper.published_date.year}")
-            print(f"   Citations: {paper.citations}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             publisher = paper.extra.get('publisher', 'N/A') if paper.extra else 'N/A'
-            print(f"   Publisher: {publisher}")
-            print()
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error during search: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # Test DOI lookup functionality
     # 测试DOI查找功能
     if papers:
-        print("Testing DOI lookup functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         test_doi = papers[0].doi
         try:
             paper = searcher.get_paper_by_doi(test_doi)
             if paper:
-                print(f"Successfully retrieved paper by DOI: {paper.title}")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             else:
-                print("Failed to retrieve paper by DOI")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         except Exception as e:
-            print(f"Error during DOI lookup: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # Test PDF download functionality (will return unsupported message)
     # 测试PDF下载功能（会返回不支持的提示）
     if papers:
-        print("\nTesting PDF download functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].doi
         try:
             pdf_path = searcher.download_pdf(paper_id, "./downloads")
         except NotImplementedError as e:
-            print(f"Expected error: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # Test paper reading functionality (will return unsupported message)
     # 测试论文阅读功能（会返回不支持的提示）
     if papers:
-        print("\nTesting paper reading functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].doi
         message = searcher.read_paper(paper_id)
-        print(f"Message: {message}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

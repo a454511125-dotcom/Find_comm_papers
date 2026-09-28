@@ -1,3 +1,4 @@
+from .retained import retained_open as open, safe_filename
 # paper_search_mcp/academic_platforms/core.py
 from typing import List, Optional, Dict, Any
 import requests
@@ -432,39 +433,39 @@ if __name__ == "__main__":
     # Check for API key
     api_key = get_env("CORE_API_KEY", "")
     if not api_key:
-        print("Warning: CORE_API_KEY environment variable not set. Some functionality may be limited.")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     searcher = CORESearcher(api_key)
 
-    print("Testing CORE search...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "machine learning"
     papers = searcher.search(query, max_results=2)
-    print(f"Found {len(papers)} papers for query '{query}':")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     for i, paper in enumerate(papers, 1):
-        print(f"\n{i}. {paper.title}")
-        print(f"   CORE ID: {paper.paper_id}")
-        print(f"   DOI: {paper.doi}")
-        print(f"   Authors: {', '.join(paper.authors[:3])}")
-        print(f"   PDF URL: {paper.pdf_url}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         if paper.abstract:
-            print(f"   Abstract preview: {paper.abstract[:150]}...")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     # Test PDF download if we have papers and API key
     if papers and api_key:
-        print("\n\nTesting CORE PDF download...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         test_core_id = papers[0].paper_id
         try:
             pdf_path = searcher.download_pdf(test_core_id, "/tmp/core_test")
-            print(f"PDF downloaded to: {pdf_path}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
             # Test text extraction
-            print("\nTesting text extraction...")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             text = searcher.read_paper(test_core_id, "/tmp/core_test")
-            print(f"Extracted text length: {len(text)} characters")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             if len(text) > 200:
-                print(f"Text preview: {text[:200]}...")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         except Exception as e:
-            print(f"PDF download/test failed: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     else:
-        print("\nSkipping PDF download test (no API key or no papers)")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

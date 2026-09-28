@@ -12,11 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mcp.server.fastmcp import FastMCP
 
-from .academic_platforms.arxiv import ArxivSearcher
-from .academic_platforms.crossref import CrossRefSearcher
-from .academic_platforms.dblp import DBLPSearcher
-from .academic_platforms.openalex import OpenAlexSearcher
-from .academic_platforms.semantic import SemanticSearcher
+from .comm_providers import PROVIDERS, SOURCE_NOTES, search_records
 from .comm_download import data_dir, download_selected as download_one, local_file, read_pdf, safe_error
 from .comm_ranking import canonical, doi_key, load_profile, rank_papers
 from .config import get_env
@@ -34,44 +30,12 @@ async def lifespan(_):
             await asyncio.to_thread(comm_cnki._worker.close)
 
 mcp = FastMCP("Find_comm_papers", lifespan=lifespan, instructions="Bilingual computational communication literature. Use comm_search_bilingual for joint Chinese/English discovery: generate one explicit Chinese keyword/concept per call; search additional Chinese concepts in separate calls, never combine them into one CNKI query and complementary English queries from the research question, disclosing them to the user. CNKI handles Chinese; comm_search/comm_search_many handle English. No cross-language deduplication: retain both lanes, rank within each, interleave equally placed results. English internal deduplication and Zotero duplicate checks remain. Rankings are heuristic, never research quality. Save reviewed order with comm_save_selection and import by manifest_id; status/retry retain checkpoints. CNKI search and downloads run as integrated Python modules in this same service and share its browser session; no other CNKI MCP or Python environment is required. CAJ is retained but needs conversion/identity verification before PDF ingestion. Ask before comm_zotero_authorize; import never opens a prompt automatically. Read full text before summarizing. English use_scihub=false means OA/public sources only.")
-PROVIDERS = {"openalex": OpenAlexSearcher, "crossref": CrossRefSearcher, "arxiv": ArxivSearcher,
-             "semantic": SemanticSearcher, "dblp": DBLPSearcher, "openalex_communication": OpenAlexSearcher}
 POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="comm-search")
 SLOTS = threading.BoundedSemaphore(8)
 
 
 def search_source(source: str, query: str, limit: int, start: int | None, end: int | None) -> dict:
-    searcher = PROVIDERS[source]()
-    kwargs = {}
-    if source in {"openalex", "openalex_communication"} and (start or end):
-        kwargs["filter"] = f"publication_year:{start or 1800}-{end or 2100}"
-    elif source == "crossref" and (start or end):
-        kwargs["filter"] = f"from-pub-date:{start or 1800}-01-01,until-pub-date:{end or 2100}-12-31"
-    elif source == "semantic" and (start or end):
-        kwargs["year"] = f"{start or ''}:{end or ''}".replace(":", "-")
-    if source == "openalex_communication":
-        journal_filter = "primary_location.source.issn:" + "|".join(load_profile()["communication_issns"])
-        kwargs["filter"] = ",".join(v for v in (kwargs.get("filter", ""), journal_filter) if v)
-    try:
-        actual_query = query
-        if source == "arxiv" and not any(marker in query for marker in (":", '"', " AND ", " OR ", " ANDNOT ")):
-            # Upstream quotes plain multiword queries as one exact phrase.
-            # Use an explicit conjunction for cross-source keyword discovery.
-            actual_query = " AND ".join(f"all:{word}" for word in query.split())
-        records = searcher.search(actual_query, max_results=limit, **kwargs)
-        papers = []
-        for rank, record in enumerate(records, 1):
-            paper = canonical(record)
-            paper["provider_rank"] = rank
-            paper["discovery_channel"] = source
-            papers.append(paper)
-        error = getattr(searcher, "last_error", "")
-        return {"status": "error" if error else ("ok" if papers else "empty_or_unreported_error"),
-                "count": len(papers), "error": error, "query_sent": actual_query, "papers": papers}
-    finally:
-        session = getattr(searcher, "session", None)
-        if session is not None:
-            session.close()
+    return search_records(source, query, limit, start, end)
 
 
 async def bounded_search(source, query, limit, start, end, timeout=40):
@@ -95,6 +59,7 @@ async def bounded_search(source, query, limit, start, end, timeout=40):
 def comm_get_profile() -> dict:
     """Show ranking weights, venue preferences, source choices and fallback policy. No secrets."""
     return {"profile": load_profile(), "available_sources": list(PROVIDERS),
+            "source_notes": SOURCE_NOTES,
             "optional_credentials_present": {key: bool(get_env(key)) for key in ("OPENALEX_API_KEY", "SEMANTIC_SCHOLAR_API_KEY", "UNPAYWALL_EMAIL")}}
 
 
@@ -127,7 +92,8 @@ async def comm_search(query: str, max_results: int = 20, per_source: int = 30,
     """Search broadly, deduplicate and rank communication first without excluding other disciplines.
 
     query: explicit English keywords (agent translates Chinese questions).
-    sources: openalex/crossref/arxiv/semantic/dblp. Null uses profile defaults.
+    sources: see comm_get_profile for the full registry and each source's limits.
+    Null uses profile defaults. IEEE/ACM remain upstream placeholders.
     weights: optional per-call overrides for relevance/discipline/recency/citations.
     boost_communication_recall: add one journal-targeted OpenAlex query alongside
     broad discovery so core communication journals are not crowded out.
@@ -147,7 +113,13 @@ async def comm_search(query: str, max_results: int = 20, per_source: int = 30,
         chosen.append("openalex_communication")
     # Validate weights/query before spending API calls.
     rank_papers([], query, weights, profile)
-    outputs = await asyncio.gather(*(bounded_search(s, query, per_source, year_start, year_end) for s in chosen))
+    # A large explicit source selection runs in batches instead of immediately
+    # marking its ninth and later sources busy in the same request.
+    source_slots = asyncio.Semaphore(8)
+    async def search_chosen(source):
+        async with source_slots:
+            return await bounded_search(source, query, per_source, year_start, year_end)
+    outputs = await asyncio.gather(*(search_chosen(s) for s in chosen))
     records, excluded = [], {"date": 0, "retracted": 0}
     diagnostics = {}
     retracted_dois = {doi_key(p.get("doi")) for out in outputs for p in out["papers"]
@@ -367,6 +339,10 @@ def comm_export_ris(papers: list[dict]) -> dict:
     path = data_dir() / f"references_{uuid.uuid4().hex}.ris"
     path.write_text("\n".join(lines), encoding="utf-8")
     return {"path": str(path), "count": len(papers), "status": "exported", "zotero_imported": False}
+
+
+from .comm_upstream import register_upstream_tools
+register_upstream_tools(mcp)
 
 
 def main():

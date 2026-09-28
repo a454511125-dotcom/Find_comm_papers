@@ -19,20 +19,22 @@ class BrowserConfigurationError(RuntimeError):
 @contextlib.contextmanager
 def local_browser_environment(binary: Path):
     """Give CloakBrowser a pre-existing executable; never allow auto-downloads."""
+    from ..comm_browser import BROWSER_LAUNCH_LOCK
     values = {
         "CLOAKBROWSER_BINARY_PATH": str(binary),
         "CLOAKBROWSER_AUTO_UPDATE": "false",
     }
-    previous = {key: os.environ.get(key) for key in values}
-    os.environ.update(values)
-    try:
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+    with BROWSER_LAUNCH_LOCK:
+        previous = {key: os.environ.get(key) for key in values}
+        os.environ.update(values)
+        try:
+            yield
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 class BrowserSession:

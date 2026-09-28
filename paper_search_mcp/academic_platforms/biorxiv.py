@@ -1,3 +1,4 @@
+from .retained import retained_open as open, safe_filename
 import logging
 import os
 import re
@@ -188,7 +189,7 @@ class BioRxivSearcher(PaperSource):
                 )
                 response.raise_for_status()
                 os.makedirs(save_path, exist_ok=True)
-                output_file = f"{save_path}/{paper_id.replace('/', '_')}.pdf"
+                output_file = f"{save_path}/{safe_filename(paper_id)}.pdf"
                 with open(output_file, "wb") as f:
                     f.write(response.content)
                 return output_file
@@ -198,7 +199,7 @@ class BioRxivSearcher(PaperSource):
                     raise Exception(
                         f"Failed to download PDF after {self.max_retries} attempts: {e}"
                     )
-                print(f"Attempt {tries} failed, retrying...")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     def read_paper(self, paper_id: str, save_path: str = "./downloads") -> str:
         """
@@ -211,7 +212,7 @@ class BioRxivSearcher(PaperSource):
         Returns:
             str: The extracted text content of the paper
         """
-        pdf_path = f"{save_path}/{paper_id.replace('/', '_')}.pdf"
+        pdf_path = f"{save_path}/{safe_filename(paper_id)}.pdf"
         if not os.path.exists(pdf_path):
             pdf_path = self.download_pdf(paper_id, save_path)
 
@@ -222,5 +223,5 @@ class BioRxivSearcher(PaperSource):
                 text += page.extract_text() + "\n"
             return text.strip()
         except Exception as e:
-            print(f"Error reading PDF for paper {paper_id}: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             return ""

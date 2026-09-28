@@ -2,6 +2,7 @@
 
 Simple wrapper adapted from scihub.py for downloading PDFs via Sci-Hub.
 """
+from .retained import retained_open as open, safe_filename
 import hashlib
 import logging
 import re
@@ -48,18 +49,18 @@ class SciHubFetcher:
             # Get direct URL to PDF
             pdf_url = self._get_direct_url(identifier)
             if not pdf_url:
-                logging.error(f"Could not find PDF URL for identifier: {identifier}")
+                logging.getLogger(__name__).error(f"Could not find PDF URL for identifier: {identifier}")
                 return None
 
             # Download the PDF
             response = self.session.get(pdf_url, timeout=30)
             
             if response.status_code != 200:
-                logging.error(f"Failed to download PDF, status {response.status_code}")
+                logging.getLogger(__name__).error(f"Failed to download PDF, status {response.status_code}")
                 return None
 
             if response.headers.get('Content-Type') != 'application/pdf':
-                logging.error("Response is not a PDF")
+                logging.getLogger(__name__).error("Response is not a PDF")
                 return None
 
             # Generate filename and save
@@ -72,7 +73,7 @@ class SciHubFetcher:
             return str(file_path)
 
         except Exception as e:
-            logging.error(f"Error downloading PDF for {identifier}: {e}")
+            logging.getLogger(__name__).error(f"Error downloading PDF for {identifier}: {e}")
             return None
 
     def _get_direct_url(self, identifier: str) -> Optional[str]:
@@ -95,18 +96,18 @@ class SciHubFetcher:
             
             # Check for article not found
             if "article not found" in response.text.lower():
-                logging.warning("Article not found on Sci-Hub")
+                logging.getLogger(__name__).warning("Article not found on Sci-Hub")
                 return None
 
             # Look for embed tag with PDF (most common in modern Sci-Hub)
             embed = soup.find('embed', {'type': 'application/pdf'})
-            logging.debug(f"Found embed tag: {embed}")
+            logging.getLogger(__name__).debug(f"Found embed tag: {embed}")
             if embed:
                 src = embed.get('src') if hasattr(embed, 'get') else None
-                logging.debug(f"Embed src: {src}")
+                logging.getLogger(__name__).debug(f"Embed src: {src}")
                 if src and isinstance(src, str):
                     pdf_url = urljoin(effective_url, src)
-                    logging.debug(f"Returning PDF URL: {pdf_url}")
+                    logging.getLogger(__name__).debug(f"Returning PDF URL: {pdf_url}")
                     return pdf_url
 
             # Look for iframe with PDF (fallback)
@@ -135,7 +136,7 @@ class SciHubFetcher:
             return None
 
         except Exception as e:
-            logging.error(f"Error getting direct URL for {identifier}: {e}")
+            logging.getLogger(__name__).error(f"Error getting direct URL for {identifier}: {e}")
             return None
 
     def _generate_filename(self, response: requests.Response, identifier: str) -> str:

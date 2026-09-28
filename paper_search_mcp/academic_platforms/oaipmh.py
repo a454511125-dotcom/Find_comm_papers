@@ -6,6 +6,7 @@ standard protocol for harvesting metadata from digital repositories.
 This base class provides common functionality for platforms that support
 OAI-PMH, such as BASE and CiteSeerX.
 """
+from .retained import retained_open as open, safe_filename
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -400,7 +401,7 @@ class OAIPMHSearcher(PaperSource):
             response = self.session.get(papers[0].pdf_url, timeout=30)
             response.raise_for_status()
             os.makedirs(save_path, exist_ok=True)
-            filename = f"{paper_id.replace('/', '_')}.pdf"
+            filename = f"{safe_filename(paper_id)}.pdf"
             output_file = os.path.join(save_path, filename)
             with open(output_file, 'wb') as f:
                 f.write(response.content)
@@ -457,11 +458,11 @@ if __name__ == "__main__":
     searcher = TestOAISearcher()
 
     # Test search
-    print("Testing OAI-PMH search...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     papers = searcher.search("machine learning", max_results=3)
-    print(f"Found {len(papers)} papers")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     for i, paper in enumerate(papers):
-        print(f"{i+1}. {paper.title}")
-        print(f"   Authors: {', '.join(paper.authors[:3])}")
-        print(f"   DOI: {paper.doi}")
-        print()
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

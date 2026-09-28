@@ -8,6 +8,7 @@ from thousands of repositories.
 OAI-PMH Endpoint: https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi
 Documentation: https://www.base-search.net/about/en/about_sources_date.php
 """
+from .retained import retained_open as open, safe_filename
 
 from typing import List, Optional, Dict, Any
 import logging
@@ -187,7 +188,7 @@ class BASESearcher(OAIPMHSearcher):
             os.makedirs(save_path, exist_ok=True)
 
             # Create safe filename
-            safe_id = paper_id.replace('/', '_').replace(':', '_')
+            safe_id = safe_filename(paper_id).replace(':', '_')
             filename = f"base_{safe_id}.pdf"
             output_file = os.path.join(save_path, filename)
 
@@ -231,7 +232,7 @@ if __name__ == "__main__":
     searcher = BASESearcher()
 
     # Test search
-    print("Testing BASE search...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     # Test queries
     test_queries = [
@@ -241,13 +242,13 @@ if __name__ == "__main__":
     ]
 
     for query in test_queries[:1]:  # Test first query only
-        print(f"\nSearching BASE for: '{query}'")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         papers = searcher.search(query, max_results=3)
-        print(f"Found {len(papers)} papers")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers):
-            print(f"{i+1}. {paper.title}")
-            print(f"   Authors: {', '.join(paper.authors[:3])}")
-            print(f"   Source: {paper.source}")
-            print(f"   PDF: {'Yes' if paper.pdf_url else 'No'}")
-            print(f"   URL: {paper.url}")
-            print()
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

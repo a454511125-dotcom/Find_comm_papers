@@ -302,17 +302,17 @@ if __name__ == "__main__":
     # Test Google Scholar searcher
     searcher = GoogleScholarSearcher()
     
-    print("Testing search functionality...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "machine learning"
     max_results = 5
     
     try:
         papers = searcher.search(query, max_results=max_results)
-        print(f"\nFound {len(papers)} papers for query '{query}':")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers, 1):
-            print(f"\n{i}. {paper.title}")
-            print(f"   Authors: {', '.join(paper.authors)}")
-            print(f"   Citations: {paper.citations}")
-            print(f"   URL: {paper.url}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error during search: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

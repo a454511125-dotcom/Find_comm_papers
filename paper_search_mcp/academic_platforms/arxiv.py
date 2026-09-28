@@ -1,3 +1,5 @@
+from .retained import retained_open as open, safe_filename
+import logging
 # paper_search_mcp/sources/arxiv.py
 import os
 import re
@@ -159,14 +161,15 @@ class ArxivSearcher(PaperSource):
                     doi=doi
                 ))
             except Exception as e:
-                print(f"Error parsing arXiv entry: {e}")
+                logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         return papers
 
     def download_pdf(self, paper_id: str, save_path: str) -> str:
         pdf_url = f"https://arxiv.org/pdf/{paper_id}.pdf"
-        response = requests.get(pdf_url)
+        response = requests.get(pdf_url, timeout=30)
+        response.raise_for_status()
         os.makedirs(save_path, exist_ok=True)
-        output_file = f"{save_path}/{paper_id}.pdf"
+        output_file = f"{save_path}/{safe_filename(paper_id)}.pdf"
         with open(output_file, 'wb') as f:
             f.write(response.content)
         return output_file
@@ -182,7 +185,7 @@ class ArxivSearcher(PaperSource):
             str: The extracted text content of the paper
         """
         # First ensure we have the PDF
-        pdf_path = f"{save_path}/{paper_id}.pdf"
+        pdf_path = f"{save_path}/{safe_filename(paper_id)}.pdf"
         if not os.path.exists(pdf_path):
             pdf_path = self.download_pdf(paper_id, save_path)
         
@@ -197,7 +200,7 @@ class ArxivSearcher(PaperSource):
             
             return text.strip()
         except Exception as e:
-            print(f"Error reading PDF for paper {paper_id}: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
             return ""
 
 if __name__ == "__main__":
@@ -205,37 +208,37 @@ if __name__ == "__main__":
     searcher = ArxivSearcher()
     
     # 测试搜索功能
-    print("Testing search functionality...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "machine learning"
     max_results = 5
     try:
         papers = searcher.search(query, max_results=max_results)
-        print(f"Found {len(papers)} papers for query '{query}':")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers, 1):
-            print(f"{i}. {paper.title} (ID: {paper.paper_id})")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error during search: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # 测试 PDF 下载功能
     if papers:
-        print("\nTesting PDF download functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].paper_id
         save_path = "./downloads"  # 确保此目录存在
         try:
             os.makedirs(save_path, exist_ok=True)
             pdf_path = searcher.download_pdf(paper_id, save_path)
-            print(f"PDF downloaded successfully: {pdf_path}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         except Exception as e:
-            print(f"Error during PDF download: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
 
     # 测试论文阅读功能
     if papers:
-        print("\nTesting paper reading functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].paper_id
         try:
             text_content = searcher.read_paper(paper_id)
-            print(f"\nFirst 500 characters of the paper content:")
-            print(text_content[:500] + "...")
-            print(f"\nTotal length of extracted text: {len(text_content)} characters")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         except Exception as e:
-            print(f"Error during paper reading: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

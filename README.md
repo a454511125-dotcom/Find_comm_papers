@@ -35,7 +35,7 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -I -B launch.py --self-check
 ```
 
-自检应列出 15 个工具。`requirements-local.txt` 记录已验证的 Windows 依赖版本，包含 Windows 专用包；它不是跨平台依赖清单。本项目未发布到 PyPI，直接安装同名或上游 PyPI 包不能获得此定制版本。
+自检应列出 78 个入口：15 个整合工具和上游 63 个兼容入口，其中 IEEE、ACM 的 6 个入口仍明确返回“上游未实现”。`requirements-local.txt` 记录已验证的 Windows 依赖版本，包含 Windows 专用包；它不是跨平台依赖清单。本项目未发布到 PyPI，直接安装同名或上游 PyPI 包不能获得此定制版本。
 
 ### 在 Codex 中注册
 
@@ -74,7 +74,7 @@ Find_comm_papers（一个 MCP 服务、一个 Python 环境）
 - 当前服务保存自己的会话和 Cookie，均位于 `COMM_MCP_DATA_DIR/cnki`，不进入代码仓库。
 - 登录与可操作的验证码仍由用户处理；空白验证页面报告为加载问题。
 
-0.3.1 曾采用转调用旧 CNKI 环境的桥接方案，只实现统一入口。0.4.0 将中文代码直接合入，移除了这一运行依赖。
+英文保留并注册原项目的检索、下载、阅读入口；中文直接使用合入的 CNKI 代码，两部分共用当前服务。
 
 ## 使用示例
 
@@ -114,7 +114,22 @@ Find_comm_papers（一个 MCP 服务、一个 Python 环境）
 | Zotero 连接与授权 | `comm_zotero_probe`、`comm_zotero_authorize` |
 | 入库与重试 | `comm_import_to_zotero`、`comm_retry` |
 
+原上游工具 `search_papers`、`search_<来源>`、`download_<来源>`、`read_<来源>_paper` 及 DOI 查询入口也在同一服务中可用。来源、参数和未实现能力见 [英文来源说明](docs/ENGLISH-SOURCES.md)。`comm_search` 可选择全部 21 类已适配来源，默认仍调用四个主要来源，避免每次检索都遍历所有网站。
+
 具体入库、重复检查、授权和恢复行为见 [WORKFLOW.md](docs/WORKFLOW.md)。
+
+## 英文全文获取
+
+```text
+论文元数据与 OA 地址
+  → 直接 PDF / 仓储与出版商链接
+  → CloakBrowser 无头浏览器：渲染网页、提取链接、点击 PDF 按钮
+  → 标题或 DOI 核验 → 保存 PDF → Zotero
+```
+
+浏览器用于直接获取失败后的回退，不能保证每篇开放论文都有可下载 PDF。验证页、登录页和访问限制会返回状态及诊断，供人工处理。中文继续使用可见的 CloakBrowser；英文使用独立的无头会话。
+
+默认复用 `COMM_CNKI_BROWSER_PATH` 指定的浏览器，也可用 `COMM_BROWSER_PATH` 单独指定英文浏览器。`COMM_BROWSER_FALLBACK=0` 关闭英文浏览器回退。单篇共享下载流程保留时间预算，最多尝试两个浏览器地址；浏览器响应会检查声明长度和实际长度，但 Playwright 会先缓冲响应，这不是浏览器内存硬上限。
 
 ## 配置与边界
 
@@ -128,7 +143,7 @@ Find_comm_papers（一个 MCP 服务、一个 Python 环境）
 
 ## 验证
 
-0.4.0 的 **115 项回归测试通过**，其中 15 项专门检查没有嵌套 MCP、没有旧中文配置/环境依赖、共享浏览器会话、异常恢复和关闭行为。
+回归覆盖来源适配、全部原生工具注册、文件保留、无头浏览器、PDF 身份核验、中文会话和 Zotero 恢复流程。最新测试结果见 [英文来源说明](docs/ENGLISH-SOURCES.md)。
 
 真实 MCP 测试中，禁止导入外部 `cnki` 包，并将旧中文配置路径指向不存在的文件；同一服务成功返回中英文结果、下载中文 PDF、核验标题并完成 Zotero 文献及实际附件核验。同一文件的重复导入、重试和新选文清单检查通过。
 
@@ -139,8 +154,9 @@ Find_comm_papers（一个 MCP 服务、一个 Python 环境）
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+$env:COMM_BROWSER_FALLBACK = '0'
 $env:COMM_TEST_ARTIFACTS = Join-Path $PWD 'test-artifacts'
-.\.venv\Scripts\python.exe -B -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py -q
+.\.venv\Scripts\python.exe -B -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_ingestion.py tests/test_comm_workflow.py tests/test_stabilization_regressions.py tests/test_comm_bilingual.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py tests/test_comm_providers.py tests/test_comm_upstream.py tests/test_comm_browser.py tests/test_comm_browser_download.py -q
 ```
 
 Windows 加密测试需要当前账户可访问原生 DPAPI。上游测试集还包含网络测试；不要将其结果与上述重点回归混为一谈。

@@ -1,3 +1,4 @@
+import logging
 # paper_search_mcp/sources/pubmed.py
 from typing import List
 import requests
@@ -137,35 +138,35 @@ if __name__ == "__main__":
     searcher = PubMedSearcher()
     
     # 测试搜索功能
-    print("Testing search functionality...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     query = "machine learning"
     max_results = 5
     try:
         papers = searcher.search(query, max_results=max_results)
-        print(f"Found {len(papers)} papers for query '{query}':")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         for i, paper in enumerate(papers, 1):
-            print(f"{i}. {paper.title}")
-            print(f"   Authors: {', '.join(paper.authors)}")
-            print(f"   DOI: {paper.doi}")
-            print(f"   URL: {paper.url}\n")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     except Exception as e:
-        print(f"Error during search: {e}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # 测试 PDF 下载功能（会返回不支持的提示）
     if papers:
-        print("\nTesting PDF download functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].paper_id
         try:
             pdf_path = searcher.download_pdf(paper_id, "./downloads")
         except NotImplementedError as e:
-            print(f"Expected error: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     
     # 测试论文阅读功能（会返回不支持的提示）
     if papers:
-        print("\nTesting paper reading functionality...")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         paper_id = papers[0].paper_id
         try:
             message = searcher.read_paper(paper_id)
-            print(f"Response: {message}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         except Exception as e:
-            print(f"Error during paper reading: {e}")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")

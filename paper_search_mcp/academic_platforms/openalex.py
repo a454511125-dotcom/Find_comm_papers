@@ -218,15 +218,15 @@ class OpenAlexSearcher(PaperSource):
 
 if __name__ == "__main__":
     searcher = OpenAlexSearcher()
-    print("Testing OpenAlex search...")
+    logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
     papers = searcher.search("CRISPR Cas9 Nature", max_results=3)
 
     for i, paper in enumerate(papers, 1):
-        print(f"\n{i}. {paper.title}")
-        print(f"   DOI: {paper.doi}")
-        print(f"   URL: {paper.url}")
-        print(f"   OA PDF: {paper.pdf_url}")
-        print(f"   Citations: {paper.citations}")
-        print(f"   Authors: {', '.join(paper.authors[:3])}")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
+        logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
         if paper.abstract:
-            print(f"   Abstract: {paper.abstract[:100]}...")
+            logging.getLogger(__name__).debug("Provider diagnostic omitted from protocol output")
