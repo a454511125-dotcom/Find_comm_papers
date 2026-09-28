@@ -1,0 +1,51 @@
+{
+  "name": "computational-communication",
+  "weights": {"relevance": 0.65, "discipline": 0.25, "recency": 0.05, "citations": 0.05},
+  "topic_prior_multiplier": 0.85,
+  "zotero": {"preferred_transport": "local"},
+  "chinese": {
+    "venues": {
+      "communication": ["新闻与传播研究", "国际新闻界", "现代传播(中国传媒大学学报)", "现代传播", "新闻大学", "新闻记者", "新闻与写作", "新闻界", "当代传播", "编辑之友", "中国出版", "出版发行研究", "出版广角", "传媒观察", "全球传媒学刊"],
+      "computational_social_science": ["社会学研究", "社会", "社会科学", "社会科学战线"],
+      "computer_science": ["计算机学报", "软件学报", "计算机研究与发展", "中文信息学报"],
+      "multidisciplinary": ["中国科学", "科学通报", "中国社会科学"]
+    },
+    "signals": {
+      "communication": ["传播", "新闻", "舆论", "社交媒体", "推荐算法", "算法推荐", "媒介", "信息茧房", "政治极化", "情感极化"],
+      "computational_social_science": ["计算社会科学", "社会网络", "数字踪迹", "集体行为"],
+      "computer_science": ["机器学习", "自然语言处理", "大语言模型", "推荐系统"]
+    },
+    "term_groups": {
+      "算法推荐": ["推荐算法", "个性化推荐", "信息流推荐", "算法分发"],
+      "政治极化": ["政治极端化", "政治两极化"],
+      "情感极化": ["情感两极化"],
+      "社交媒体": ["社会化媒体", "社交平台"],
+      "信息茧房": ["回音室", "回声室"]
+    }
+  },
+  "term_variants": {
+    "algorithm": ["algorithms", "algorithmic", "algorithmically"],
+    "recommendation": ["recommendations", "recommender", "recommenders", "recommended"],
+    "polarization": ["polarisation", "polarized", "polarised", "polarizing", "polarising"],
+    "political": ["politics"],
+    "ideological": ["ideology"],
+    "partisan": ["partisanship"],
+    "election": ["elections"],
+    "voter": ["voters"]
+  },
+  "default_sources": ["openalex", "crossref", "arxiv", "semantic"],
+  "communication_issns": ["1932-8036", "2056-3051", "1083-6101", "2183-2439", "2665-9085"],
+  "discipline_scores": {"communication": 1.0, "computational_social_science": 0.85, "computer_science": 0.7, "multidisciplinary": 0.6, "other": 0.3},
+  "venues": {
+    "communication": ["Computational Communication Research", "International Journal of Communication", "Social Media + Society", "Journal of Computer-Mediated Communication", "Media and Communication", "Journal of Communication", "Communication Research", "Communication Theory", "Human Communication Research", "New Media & Society", "Information, Communication & Society", "Digital Journalism", "Journalism", "Journalism Studies", "Political Communication", "International Communication Gazette", "Internet Policy Review", "Journal of Broadcasting & Electronic Media", "Journal of Broadcasting and Electronic Media", "Asian Journal of Communication", "Journal of Information Technology & Politics", "Journal of Information Technology and Politics"],
+    "computational_social_science": ["Social Science Computer Review", "Nature Human Behaviour", "Nature Human Behavior", "EPJ Data Science", "Journal of Computational Social Science", "Social Networks", "Big Data & Society", "ICWSM", "Proceedings of the International AAAI Conference on Web and Social Media", "CSCW", "Proceedings of the ACM on Human-Computer Interaction"],
+    "computer_science": ["CHI", "ACL", "EMNLP", "NAACL", "NeurIPS", "ICML", "ICLR", "KDD", "WWW", "The Web Conference", "AAAI", "IJCAI", "Transactions of the Association for Computational Linguistics", "Journal of Machine Learning Research"],
+    "multidisciplinary": ["Nature", "Science", "PNAS", "PNAS Nexus", "Proceedings of the National Academy of Sciences", "Proceedings of the National Academy of Sciences of the United States of America", "Nature Communications", "Science Advances", "Scientific Reports", "PLOS ONE"]
+  },
+  "signals": {
+    "communication": ["computational communication", "communication research", "political communication", "digital journalism", "news media", "news consumption", "media effects", "media framing", "agenda setting", "public opinion", "social media", "platform governance", "content moderation", "misinformation", "disinformation", "information diffusion", "international communication", "strategic narratives"],
+    "computational_social_science": ["computational social science", "computational sociology", "social network analysis", "collective behavior", "collective behaviour", "social contagion", "online communities", "digital trace", "social computing", "human behavior", "human behaviour"],
+    "computer_science": ["computer science", "cs.CL", "cs.SI", "cs.CY", "cs.HC", "cs.IR", "cs.LG", "natural language processing", "large language model", "text classification", "multimodal", "machine learning", "causal inference"]
+  },
+  "download": {"use_scihub": true, "scihub_base_url": "https://www.sci-hub.st", "max_pdf_mb": 50, "timeout_seconds": 25, "total_timeout_seconds": 90, "batch_limit": 10}
+}

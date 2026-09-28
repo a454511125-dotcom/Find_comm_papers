@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "find-comm-papers"
+version = "0.3.1"
+authors = [{ name = "P.S Zhang", email = "pengsongzhang96@gmail.com" }]
+description = "Bilingual literature discovery and Zotero ingestion for computational communication."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = [
+    "mcp",
+    "academic",
+    "papers",
+    "search",
+    "arxiv",
+    "pubmed",
+    "semantic-scholar",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "tomli>=2; python_version < '3.11'",
+    "requests",
+    "feedparser",
+    "fastmcp",
+    "pypdf",
+    "mcp[cli]>=1.8.0,<2",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "httpx[socks]>=0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/a454511125-dotcom/Find_comm_papers"
+Repository = "https://github.com/a454511125-dotcom/Find_comm_papers"
+Issues = "https://github.com/a454511125-dotcom/Find_comm_papers/issues"
+
+[project.scripts]
+find-comm-papers = "paper_search_mcp.comm_server:main"
+paper-search-mcp = "paper_search_mcp.server:main"
+paper-search = "paper_search_mcp.cli:main"
+comm-paper-mcp = "paper_search_mcp.comm_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["paper_search_mcp"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
