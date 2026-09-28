@@ -4,8 +4,6 @@
 
 Bilingual literature discovery, communication-prioritized ranking, verified PDF retrieval, and resumable Zotero ingestion for computational communication research.
 
-当前源码版本：**0.4.0**。将 [openags/paper-search-mcp](https://github.com/openags/paper-search-mcp) 的英文功能与 [wuruiqi/cnki-mcp](https://github.com/wuruiqi/cnki-mcp) 的中文实现合入同一个 Python 项目、同一个 MCP 服务，保留两者的 MIT 许可证。上游来源和改动范围见 [UPSTREAM.md](docs/UPSTREAM.md)。本仓库提供源码，不包含 Python 运行时、浏览器、账号授权、文献全文或个人文库数据。
-
 ## 功能
 
 - **中英文联合检索**：中文由包内 CNKI 模块直接操作浏览器；英文通过 OpenAlex、Crossref、arXiv、Semantic Scholar、dblp 等入口。
