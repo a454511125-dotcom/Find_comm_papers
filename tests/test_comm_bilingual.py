@@ -59,7 +59,7 @@ def test_one_language_failure_preserves_the_other_lane():
             per_language=10,
             year_start=2020,
             year_end=2025,
-            english_sources=["openalex"],
+            english_sources=["wos"],
             db_code="CJFD",
             weights=None,
             cnki_search=failed_cnki,
@@ -98,7 +98,7 @@ def test_bilingual_query_validation(overrides, message):
         "per_language": 20,
         "year_start": 2020,
         "year_end": 2025,
-        "english_sources": ["openalex"],
+        "english_sources": ["wos"],
         "db_code": "CJFD",
         "weights": None,
         "cnki_search": None,
@@ -176,7 +176,7 @@ class FakeResponse:
 
 class FakeRoute:
     def __init__(self, response, resource_type="document"):
-        self.request = SimpleNamespace(resource_type=resource_type)
+        self.request = SimpleNamespace(resource_type=resource_type, url="https://kns.cnki.net/test")
         self.response = response
         self.aborted = False
         self.fulfilled = None

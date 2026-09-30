@@ -41,11 +41,13 @@ class BrowserSession:
     """One lazy, visible browser owned by the provider's serialized event loop."""
 
     def __init__(self, session_path: Path, browser_binary: Path | None = None,
-                 seed_cookie_file: Path | None = None):
+                 seed_cookie_file: Path | None = None, webvpn_enabled: bool = False):
         self.session_path = Path(session_path)
         self.browser_binary = Path(browser_binary) if browser_binary else None
         self.seed_cookie_file = Path(seed_cookie_file) if seed_cookie_file else None
         self.cookie_file = self.session_path.parent / "cookies.json"
+        self.webvpn_enabled = webvpn_enabled
+        self.webvpn_cookie_file = self.session_path.parent / "bfsu-webvpn-cookies.dpapi"
         self._context = None
         self._contexts = []
 
@@ -115,9 +117,23 @@ class BrowserSession:
                     continue
                 if cookies:
                     await context.add_cookies(cookies)
-                return
+                break
             except (OSError, ValueError, TypeError):
                 continue
+        if self.webvpn_enabled and self.webvpn_cookie_file.is_file():
+            from ..comm_auth import protect
+            try:
+                cookies = json.loads(protect(self.webvpn_cookie_file.read_bytes(), decrypt=True))
+                cookies = [cookie for cookie in cookies if self._webvpn_cookie(cookie)]
+                if cookies:
+                    await context.add_cookies(cookies)
+            except (OSError, RuntimeError, ValueError, TypeError, KeyError):
+                # A revoked/foreign Windows cache must lead to ordinary login.
+                pass
+
+    @staticmethod
+    def _webvpn_cookie(cookie):
+        return cookie.get("domain", "").lower().lstrip(".") == "webvpn.bfsu.edu.cn"
 
     async def save_cookies(self):
         if self._context is None:
@@ -129,6 +145,10 @@ class BrowserSession:
         self.cookie_file.write_text(
             json.dumps(retained, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        if self.webvpn_enabled:
+            from ..comm_auth import protect
+            gateway_cookies = [cookie for cookie in cookies if self._webvpn_cookie(cookie)]
+            self.webvpn_cookie_file.write_bytes(protect(json.dumps(gateway_cookies).encode("utf-8")))
 
     async def close(self):
         with contextlib.suppress(Exception):

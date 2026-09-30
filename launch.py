@@ -8,6 +8,10 @@ import sys
 ROOT = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
+if (ROOT / ".env").is_file():
+    os.environ.setdefault("PAPER_SEARCH_MCP_ENV_FILE", str(ROOT / ".env"))
+from paper_search_mcp.config import load_env_file
+load_env_file()
 os.environ.setdefault("COMM_MCP_PROFILE", str(ROOT / "paper_search_mcp" / "comm_profile.json"))
 os.environ.setdefault("COMM_MCP_DATA_DIR", str(Path.home() / "Documents" / "FindPapersData"))
 

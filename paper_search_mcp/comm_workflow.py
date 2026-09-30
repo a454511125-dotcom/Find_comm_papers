@@ -13,7 +13,7 @@ from .comm_zotero import ZoteroClient, ZoteroError, safe_failure, stable_key, me
 def enrich(paper):
     """Only enrich new items. Never overwrite existing Zotero metadata."""
     paper = canonical(paper)
-    if paper.get("doi") and paper.get("source") != "cnki":
+    if paper.get("doi") and paper.get("source") not in {"cnki", "wos"}:
         try:
             message = fetch_json("https://api.crossref.org/works/" + quote(paper["doi"], safe=""))["message"]
             if doi_key(message.get("DOI")) != paper["doi"]:

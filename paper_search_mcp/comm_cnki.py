@@ -13,12 +13,13 @@ from pathlib import Path
 from .comm_cnki_host import CNKIBackend
 from .comm_download import data_dir, verify_pdf
 from .comm_manifest import persistent_lock
+from .config import get_env
 
 
 def configuration():
     """Read this service's direct settings only; no other MCP installation is used."""
-    binary = os.environ.get("COMM_CNKI_BROWSER_PATH") or os.environ.get("CLOAKBROWSER_BINARY_PATH")
-    seed = os.environ.get("COMM_CNKI_COOKIE_FILE")
+    binary = get_env("COMM_CNKI_BROWSER_PATH") or get_env("CLOAKBROWSER_BINARY_PATH")
+    seed = get_env("COMM_CNKI_COOKIE_FILE")
     if binary and not Path(binary).is_file():
         raise RuntimeError("cnki_browser_binary_missing: configure COMM_CNKI_BROWSER_PATH")
     if seed and not Path(seed).is_file():
@@ -35,6 +36,7 @@ class Worker:
         self.loop = asyncio.new_event_loop()
         self.ready = concurrent.futures.Future()
         self.pending = set()
+        self.wos_inflight = {}
         self.pending_lock = threading.Lock()
         self.closing = False
         self.thread = threading.Thread(target=self._run, daemon=True, name="find-cnki")
@@ -52,7 +54,7 @@ class Worker:
             with self.pending_lock:
                 for reply in self.pending:
                     if not reply.done():
-                        reply.set_result({"success": False, "message": "CNKI operation stopped; retry after restarting the MCP"})
+                        reply.set_result({"success": False, "message": "Literature operation stopped; retry after restarting the MCP"})
                 self.pending.clear()
             tasks = asyncio.all_tasks(self.loop)
             for task in tasks:
@@ -65,41 +67,74 @@ class Worker:
     async def _serve(self):
         self.queue = asyncio.Queue()
         backend = CNKIBackend(**configuration())
+        wos = None
+        wos_browser = None
         try:
             self.ready.set_result(True)
             while True:
                 name, arguments, reply = await self.queue.get()
                 try:
-                    method = {"cnki_search": backend.search, "cnki_download": backend.download}[name]
+                    provider, operation = name.split("_", 1)
+                    if provider == "wos":
+                        if wos is None:
+                            from .comm_wos_host import WOSBackend
+                            if backend.browser.webvpn_enabled:
+                                wos_browser = backend.browser
+                            else:
+                                from .cnki.browser import BrowserSession
+                                wos_browser = BrowserSession(**configuration(), webvpn_enabled=True)
+                            wos = WOSBackend(wos_browser)
+                        method = getattr(wos, operation)
+                    else:
+                        method = getattr(backend, operation)
                     with persistent_lock(data_dir() / "cnki" / "request.lock"):
-                        value = await method(**arguments)
+                        value = await asyncio.wait_for(method(**arguments), timeout=300) if provider == 'wos' else await method(**arguments)
                     if not reply.done():
                         reply.set_result(value)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     if not reply.done():
-                        reply.set_result({"success": False, "message": "Integrated CNKI: " + type(exc).__name__})
+                        reply.set_result({"success": False, "status": "error",
+                                          "stage": wos.stage if provider == 'wos' and wos is not None else operation,
+                                          "message": provider.upper() + ": " + type(exc).__name__})
         finally:
+            if wos_browser is not None and wos_browser is not backend.browser:
+                await wos_browser.close()
             await backend.close()
 
     async def call(self, name, arguments):
-        if name not in {"cnki_search", "cnki_download"}:
-            raise ValueError("Unknown CNKI operation")
+        if name not in {p + "_" + op for p in ("cnki", "wos") for op in ("search", "download", "authenticate", "access_status")}:
+            raise ValueError("Unknown literature operation")
         await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(self.ready)), timeout=45)
         if self.closing or not self.thread.is_alive():
-            return {"success": False, "message": "CNKI worker stopped; restart the unified MCP"}
-        future = concurrent.futures.Future()
+            return {"success": False, "message": "Literature worker stopped; restart the unified MCP"}
+        key = (name, json.dumps(arguments,sort_keys=True,ensure_ascii=False)) if name.startswith('wos_') else None
+        queued = True
         with self.pending_lock:
+            future = self.wos_inflight.get(key) if key else None
+            if future is not None:
+                queued = False
+            else:
+                future = concurrent.futures.Future()
+                if key:
+                    self.wos_inflight[key] = future
             self.pending.add(future)
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, (name, arguments, future))
+        if queued:
+            self.loop.call_soon_threadsafe(self.queue.put_nowait, (name, arguments, future))
+        answered = False
         try:
-            return await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), timeout=240)
+            value = await asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)), timeout=330 if key else 240)
+            answered = True
+            return value
         except asyncio.TimeoutError:
-            return {"success": False, "message": "CNKI timed out; the queued operation may still be running"}
+            return {"success": False, "status": "running", "operation_continues": True,
+                    "message": "Operation still queued/running; an identical WoS retry joins the existing request without repeating it." if key else "CNKI timed out; the queued operation may still be running"}
         finally:
             with self.pending_lock:
                 self.pending.discard(future)
+                if key and answered and self.wos_inflight.get(key) is future:
+                    self.wos_inflight.pop(key,None)
 
     def close(self):
         self.closing = True
@@ -125,13 +160,22 @@ async def search(**arguments):
     return await call("cnki_search", arguments)
 
 
+async def authenticate():
+    return await call("cnki_authenticate", {})
+
+
+async def access_status():
+    return await call("cnki_access_status", {})
+
+
 async def download(paper):
     url = paper.get("extra", {}).get("cnki_url") or paper.get("url")
     result = await call("cnki_download", {"detail_url": url, "title": paper["title"],
         "referer":paper.get("extra", {}).get("cnki_referer", "")})
     receipt = {"status": "not_downloaded", "source": "cnki", "paper": paper,
                "message": result.get("message", ""), "captcha": result.get("captcha", False)}
-    for field in ("diagnostic_snapshot", "screenshot", "page_title", "blank_verification_page"):
+    for field in ("diagnostic_snapshot", "screenshot", "page_title", "blank_verification_page",
+                  "authentication_required", "authentication_stage", "access_mode", "login_url", "network_diagnostics"):
         if field in result:
             receipt[field] = result[field]
     if result.get("file_path"):

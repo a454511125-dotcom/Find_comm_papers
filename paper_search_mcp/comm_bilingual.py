@@ -135,12 +135,15 @@ async def search(query, chinese_query, english_queries, languages, max_results, 
         chinese_query = single_keyword(chinese_query)
     if "en" in languages and (not english_queries or len(english_queries) > 6 or any(not q.strip() for q in english_queries)):
         raise ValueError("Supply 1..6 explicit english_queries before searching en")
+    if "en" in languages and english_sources and set(english_sources) != {"wos"}:
+        raise ValueError("English discovery now uses WoS; omit english_sources or pass ['wos']")
     validate_weights({**load_profile()["weights"], **(weights or {})})
     async def zh():
         raw = await cnki_search(query=chinese_query, year_start=start, year_end=end,
                                 max_results=per_language, db_code=db_code)
         if not raw.get("success"):
-            return [], {"status": "needs_attention" if raw.get("captcha") else "unavailable",
+            return [], {"status": "needs_attention" if raw.get("captcha") or raw.get("authentication_required") else "unavailable",
+                        **{k:raw[k] for k in ("authentication_required", "authentication_stage", "login_url") if k in raw},
                         "message": str(raw.get("message", "CNKI search unavailable"))[:500],
                         "network_diagnostics": raw.get("network_diagnostics", []),
                         "page_title": raw.get("page_title", ""),
@@ -163,9 +166,9 @@ async def search(query, chinese_query, english_queries, languages, max_results, 
                                    max_results=per_language, per_source=per_language, sources=english_sources,
                                    year_start=start, year_end=end, weights=weights)
         diagnostics = raw.get("searches", [])
-        errors = any(s.get("status") != "ok" for run in diagnostics for s in run.get("sources", {}).values())
+        errors = any(s.get("status") not in {"ok", "empty"} for run in diagnostics for s in run.get("sources", {}).values())
         papers = raw.get("papers", [])
-        return papers, {"status": "partial" if errors and papers else "unavailable" if errors else "ok" if papers else "empty",
+        return papers, {"status": raw.get("status") or ("partial" if errors and papers else "unavailable" if errors else "ok" if papers else "empty"),
                         "count": len(papers), "searches": diagnostics}
     handlers = {"zh": zh, "en": en}
     outputs = await asyncio.gather(*(handlers[lang]() for lang in languages), return_exceptions=True)
@@ -182,4 +185,4 @@ async def search(query, chinese_query, english_queries, languages, max_results, 
             "counts_by_language": {lang: sum(p["language"] == lang for p in papers) for lang in languages},
             "papers": papers, "cross_language_deduplication": False,
             "ordering": "Each language is ranked for relevance and discipline; equal within-language ranks alternate, without comparing raw bilingual scores/citation counts.",
-            "note": "English multi-provider deduplication and Zotero-library duplicate checking remain enabled. Source failures do not mean no literature exists."}
+            "note": "English WoS query variants are deduplicated; Zotero duplicate checking remains enabled. Source failures do not mean no literature exists."}

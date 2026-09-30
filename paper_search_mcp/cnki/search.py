@@ -9,6 +9,7 @@ The installed source includes subsequent local CNKI compatibility fixes.
 import os
 import re
 from typing import Dict, List, Optional, Tuple
+from .webvpn import resolve_cnki_url
 
 
 _INPUT_SELECTORS = ["input#txt_search", "input.search-input", "input[name='kw']"]
@@ -201,7 +202,7 @@ async def _extract_rows(page, max_count: int) -> List[Dict]:
                     "journal":   journal,
                     "authors":   authors,
                     "citations": citations,
-                    "url":       href if href.startswith("http") else f"https://kns.cnki.net{href}",
+                    "url":       resolve_cnki_url(href, getattr(page, "url", "https://kns.cnki.net/")),
                 })
             except Exception:
                 pass

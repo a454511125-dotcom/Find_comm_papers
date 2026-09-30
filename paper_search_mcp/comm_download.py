@@ -158,6 +158,9 @@ def safe_error(exc: Exception) -> str:
 
 
 def download_selected(record: dict, use_scihub: bool | None = None) -> dict:
+    if record.get("source") == "wos":
+        from .comm_wos import download_sync
+        return download_sync(record, use_scihub)
     if record.get("source") == "cnki":
         from .comm_cnki import download_sync
         return download_sync(record, use_scihub)

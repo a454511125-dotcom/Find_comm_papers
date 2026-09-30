@@ -12,13 +12,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mcp.server.fastmcp import FastMCP
 
-from .comm_providers import PROVIDERS, SOURCE_NOTES, search_records
 from .comm_download import data_dir, download_selected as download_one, local_file, read_pdf, safe_error
 from .comm_ranking import canonical, doi_key, load_profile, rank_papers
 from .config import get_env
 from . import comm_auth, comm_manifest, comm_workflow
 from .comm_zotero import safe_failure
-from . import comm_bilingual, comm_cnki
+from . import comm_bilingual, comm_cnki, comm_wos
 
 
 @asynccontextmanager
@@ -29,12 +28,13 @@ async def lifespan(_):
         if comm_cnki._worker:
             await asyncio.to_thread(comm_cnki._worker.close)
 
-mcp = FastMCP("Find_comm_papers", lifespan=lifespan, instructions="Bilingual computational communication literature. Use comm_search_bilingual for joint Chinese/English discovery: generate one explicit Chinese keyword/concept per call; search additional Chinese concepts in separate calls, never combine them into one CNKI query and complementary English queries from the research question, disclosing them to the user. CNKI handles Chinese; comm_search/comm_search_many handle English. No cross-language deduplication: retain both lanes, rank within each, interleave equally placed results. English internal deduplication and Zotero duplicate checks remain. Rankings are heuristic, never research quality. Save reviewed order with comm_save_selection and import by manifest_id; status/retry retain checkpoints. CNKI search and downloads run as integrated Python modules in this same service and share its browser session; no other CNKI MCP or Python environment is required. CAJ is retained but needs conversion/identity verification before PDF ingestion. Ask before comm_zotero_authorize; import never opens a prompt automatically. Read full text before summarizing. English use_scihub=false means OA/public sources only.")
+mcp = FastMCP("Find_comm_papers", lifespan=lifespan, instructions="Chinese discovery uses CNKI; English discovery uses Web of Science Core Collection through BFSU WebVPN. Use comm_search_bilingual for both languages, or comm_wos_search for English alone. Supply one explicit Chinese concept per call and 1..6 explicit English topic expressions; disclose query variants. School login is completed by the user in the visible browser; never request passwords as tool arguments. Reuse the same institutional browser for search and full-text links. WoS indexes records; PDF access depends on publisher or institutional entitlements. Do not claim a downloaded PDF until identity validation succeeds. Rank within each language and interleave; no cross-language deduplication. Rankings are heuristic, not research quality. Save reviewed order with comm_save_selection and import by manifest_id. Ask before comm_zotero_authorize. Read full text before summarizing. Legacy multi-provider discovery is disabled by default.")
 POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="comm-search")
 SLOTS = threading.BoundedSemaphore(8)
 
 
 def search_source(source: str, query: str, limit: int, start: int | None, end: int | None) -> dict:
+    from .comm_providers import search_records
     return search_records(source, query, limit, start, end)
 
 
@@ -58,9 +58,31 @@ async def bounded_search(source, query, limit, start, end, timeout=40):
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
 def comm_get_profile() -> dict:
     """Show ranking weights, venue preferences, source choices and fallback policy. No secrets."""
-    return {"profile": load_profile(), "available_sources": list(PROVIDERS),
-            "source_notes": SOURCE_NOTES,
-            "optional_credentials_present": {key: bool(get_env(key)) for key in ("OPENALEX_API_KEY", "SEMANTIC_SCHOLAR_API_KEY", "UNPAYWALL_EMAIL")}}
+    profile = load_profile()
+    profile["download"] = {k:v for k,v in profile["download"].items() if k not in {"use_scihub", "scihub_base_url"}}
+    return {"profile": profile, "available_sources": ["cnki", "wos"],
+            "source_notes": {"cnki": "Chinese discovery and full text via BFSU WebVPN",
+                             "wos": "English Core Collection discovery; follow institutional publisher/SFX links for PDF"},
+            "workflow": "Search → review selection → download and verify PDF → RIS or Zotero",
+            "legacy_tools_enabled": get_env("COMM_ENABLE_LEGACY_TOOLS") == "1"}
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True})
+async def comm_cnki_authenticate() -> dict:
+    """Check BFSU WebVPN access or open the dedicated browser for manual school login.
+
+    No account/password arguments. The user completes login/CAPTCHA in the browser.
+    Call again afterwards; CNKI search and download also run this preflight.
+    Gateway cookies are saved with Windows DPAPI; no secret is returned.
+    This verifies institutional identity, not each paper's full-text entitlement.
+    """
+    return await comm_cnki.authenticate()
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+async def comm_cnki_access_status() -> dict:
+    """Show configured CNKI access mode and last check; never launch a browser or return secrets."""
+    return await comm_cnki.access_status()
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True})
@@ -70,7 +92,7 @@ async def comm_search_bilingual(query: str, chinese_query: str | None = None,
                                 per_language: int = 30, year_start: int | None = None,
                                 year_end: int | None = None, english_sources: list[str] | None = None,
                                 db_code: str = "CJFD", weights: dict[str, float] | None = None) -> dict:
-    """Joint CNKI Chinese and multi-source English discovery; no cross-language deduplication.
+    """Joint CNKI Chinese and WoS English discovery; no cross-language deduplication.
 
     The agent must supply one Chinese keyword/concept (e.g. 算法推荐; search 政治极化 separately) and 1..6 English
     query variants for the requested languages (default both zh/en). These are not translated
@@ -81,10 +103,41 @@ async def comm_search_bilingual(query: str, chinese_query: str | None = None,
     """
     return await comm_bilingual.search(query, chinese_query, english_queries, languages,
         max_results, per_language, year_start, year_end, english_sources, db_code, weights,
-        cnki_search=comm_cnki.search, english_search=comm_search_many)
+        cnki_search=comm_cnki.search, english_search=comm_wos.search_many)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True})
+async def comm_wos_authenticate() -> dict:
+    """Open/check BFSU WebVPN → Library → WoS; user completes login in the browser.
+
+    Shares the institutional browser with CNKI. No credentials in arguments or output.
+    Call again after login. Search/download automatically perform the same preflight.
+    """
+    return await comm_wos.authenticate()
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
+async def comm_wos_access_status() -> dict:
+    """Report last WoS institution check without opening a browser or exposing secrets."""
+    return await comm_wos.access_status()
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True})
+async def comm_wos_search(queries: list[str], ranking_query: str, max_results: int = 20,
+                          per_query: int = 30, year_start: int | None = None,
+                          year_end: int | None = None, weights: dict[str, float] | None = None) -> dict:
+    """Search 1..6 explicit English topic expressions in WoS Core Collection.
+
+    Expressions may contain Boolean operators and quoted phrases, without a TS= wrapper.
+    The service adds topic, year and English-language constraints. Per-query export is 1..100
+    records. Exported Full Records preserve authors, DOI, abstract, venue, year and accession ID.
+    Merge query variants and rank candidates; coverage depends on BFSU's subscription.
+    Login/page verification returns needs_attention; retry after manual completion.
+    """
+    return await comm_wos.search_many(queries, ranking_query, max_results, per_query,
+                                      year_start=year_start, year_end=year_end, weights=weights)
+
+
 async def comm_search(query: str, max_results: int = 20, per_source: int = 30,
                       sources: list[str] | None = None, year_start: int | None = None,
                       year_end: int | None = None, weights: dict[str, float] | None = None,
@@ -105,8 +158,9 @@ async def comm_search(query: str, max_results: int = 20, per_source: int = 30,
         raise ValueError("Nonempty query; max_results and per_source must be 1..100")
     if year_start and year_end and year_start > year_end:
         raise ValueError("year_start must not exceed year_end")
+    from .comm_providers import PROVIDERS
     profile = load_profile()
-    chosen = list(dict.fromkeys(sources if sources is not None else profile["default_sources"]))
+    chosen = list(dict.fromkeys(sources if sources is not None else ["openalex", "crossref", "arxiv", "semantic"]))
     if not chosen or set(chosen) - set(PROVIDERS):
         raise ValueError(f"Choose one or more of {list(PROVIDERS)}")
     if boost_communication_recall and "openalex" in chosen and "openalex_communication" not in chosen:
@@ -152,7 +206,6 @@ def comm_rank(papers: list[dict], query: str, weights: dict[str, float] | None =
     return {"query": query, "count": len(ranked), "papers": ranked}
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def comm_search_many(queries: list[str], ranking_query: str, max_results: int = 20,
                            per_source: int = 30, sources: list[str] | None = None,
                            year_start: int | None = None, year_end: int | None = None,
@@ -260,9 +313,10 @@ async def comm_download(paper: dict, use_scihub: bool | None = None) -> dict:
     """Retrieve one selected paper into the configured library with PDF identity validation.
 
     CNKI records use the existing Chinese access permissions and retained-response bridge.
-    English records try record/publisher/OA locations, OpenAlex and optional Unpaywall, then the
-    user-enabled Sci-Hub fallback. Null uses profile policy; false means OA/public
-    sources only. Existing files are never overwritten or deleted.
+    WoS records follow current publisher/SFX links in the same school-authorized browser.
+    WoS failures distinguish login, page verification and missing full text. Legacy imported
+    English records retain their older downloader; use_scihub applies only to those records.
+    Existing files are never overwritten or deleted.
     """
     return await asyncio.to_thread(download_one, paper, use_scihub)
 
@@ -341,8 +395,12 @@ def comm_export_ris(papers: list[dict]) -> dict:
     return {"path": str(path), "count": len(papers), "status": "exported", "zotero_imported": False}
 
 
-from .comm_upstream import register_upstream_tools
-register_upstream_tools(mcp)
+# Retained on disk for explicit rollback; never initialized in the default workflow.
+if get_env("COMM_ENABLE_LEGACY_TOOLS") == "1":
+    from .comm_upstream import register_upstream_tools
+    register_upstream_tools(mcp)
+    mcp.add_tool(comm_search)
+    mcp.add_tool(comm_search_many)
 
 
 def main():
