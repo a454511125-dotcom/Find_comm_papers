@@ -20,6 +20,7 @@ authorization/
 cnki-bridge/
 browser-artifacts/
 profile/
+browser-profiles/
 cookies*.json
 *.dpapi
 *.pdf

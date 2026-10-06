@@ -14,7 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from .cnki.webvpn import ORIGIN, LOGIN_URL, PUBLIC_ADDRESS_KEY, _cipher, contains_login_form
+from .cnki.webvpn import (ORIGIN, LOGIN_URL, PUBLIC_ADDRESS_KEY, _cipher,
+                         contains_login_form, is_portal, is_school_login)
 from .comm_ranking import canonical
 
 
@@ -139,6 +140,8 @@ EXPORT_CAPTURE = r"""() => {
 class WOSBackend:
     def __init__(self, browser):
         self.browser = browser
+        self.gateway = browser.webvpn_gateway
+        self._active_context = None
         self.page = None
         self.ready = False
         self.stage = "not_checked"
@@ -149,6 +152,8 @@ class WOSBackend:
     async def access_status(self):
         return {"source": "wos", "access_mode": "bfsu_webvpn", "login_url": LOGIN_URL,
                 "last_check_authenticated": self.ready, "stage": self.stage,
+                "school_login": self.gateway.status(),
+                "session_persistence": dict(self.browser.session_persistence_status),
                 "browser_open": self.page is not None and not self.page.is_closed()}
 
     async def _dismiss(self):
@@ -161,15 +166,18 @@ class WOSBackend:
     async def _follow(self, locator):
         context = await self.browser.get_context()
         before = list(context.pages)
+        entry = self.page
         old_url = self.page.url
         await locator.click(timeout=15000)
         for _ in range(60):
             opened = [p for p in context.pages if p not in before and not p.is_closed()]
             if opened:
                 self.page = opened[-1]
+                self.gateway.release_page(entry)
                 await self.page.wait_for_load_state("domcontentloaded", timeout=30000)
                 return
             if self.page.url != old_url:
+                self.gateway.release_page(entry)
                 await self.page.wait_for_load_state("domcontentloaded", timeout=30000)
                 return
             await asyncio.sleep(0.25)
@@ -179,46 +187,44 @@ class WOSBackend:
         await self.page.bring_to_front()
         return {"success": False, "status": "needs_attention", "source": "wos",
             "authentication_required": True, "authentication_stage": stage, "login_url": LOGIN_URL,
-            "message": "请在已打开的文献浏览器完成北外登录或页面验证，然后重试。英文路径：WebVPN → 图书馆资源 → Web of Science。"}
+            "school_authenticated": self.gateway.ready, "shared_school_login": True,
+            "message": ("北外学校会话已确认，但图书馆的 WoS 入口尚未加载，请查看当前资源页后重试。"
+                        if stage == "library_entry" else
+                        "学校登录已共用；WoS 页面尚未确认北外机构身份，请完成当前数据库页面的验证后重试。")}
 
     async def authenticate(self):
         context = await self.browser.get_context()
-        if self.page is None or self.page.is_closed():
-            self.page = await context.new_page()
-            await self.page.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=30000)
-        if self.ready:
-            # Validate the gateway ticket while retaining the WoS SPA session.
-            probe = await context.new_page()
-            try:
-                await probe.goto(ORIGIN + "/", wait_until="domcontentloaded", timeout=30000)
-                if await contains_login_form(probe) or urlsplit(probe.url).path != "/":
-                    self.ready = False
-                    self.page = probe
-                    return await self._required("webvpn_login")
-            finally:
-                if probe is not self.page:
-                    await probe.close()
-            if self.ready and is_wos(self.page.url):
-                # A valid gateway ticket does not prove that WoS's SPA session
-                # is still alive. Reload its landing page and check the badge.
-                base = urlsplit(wos_url(self.page.url))
-                self.ready = False
-                await self.page.goto(resource_url(urlunsplit((base.scheme,base.netloc,'/wos/woscc/smart-search','',''))), wait_until='domcontentloaded', timeout=30000)
-        if urlsplit(self.page.url).path.startswith('/login') or await contains_login_form(self.page):
-            return await self._required("webvpn_login")
-        if not is_wos(self.page.url):
+        if context is not self._active_context:
+            self._active_context = context
+            self.ready, self.stage = False, "not_checked"
+            if self.page not in context.pages:
+                self.page = None
+        access = await self.gateway.ensure(context)
+        if not access.get("success"):
+            self.ready, self.stage = False, access["authentication_stage"]
+            return {**access, "source": "wos"}
+        current = self.page is not None and not self.page.is_closed() and is_wos(self.page.url)
+        if not current:
+            self.page = None
             for candidate in reversed(context.pages):
                 if not candidate.is_closed() and is_wos(candidate.url):
                     self.page = candidate
                     break
+        if self.page is not None:
+            if self.ready or not current or self.stage != "wos_institution":
+                # Check the database session separately from the school ticket.
+                base = urlsplit(wos_url(self.page.url))
+                await self.page.goto(resource_url(urlunsplit((base.scheme,base.netloc,'/wos/woscc/smart-search','',''))), wait_until='domcontentloaded', timeout=30000)
+        else:
+            self.page = self.gateway.page
+        self.ready = False
         if not is_wos(self.page.url):
-            parsed = urlsplit(self.page.url)
-            if parsed.hostname == "webvpn.bfsu.edu.cn" and parsed.path == "/":
+            if is_portal(self.page.url):
                 card = self.page.get_by_role("link").filter(has_text="图书馆资源").first
                 with contextlib.suppress(Exception):
                     await card.wait_for(state="visible", timeout=8000)
                 if not await card.count():
-                    return await self._required("webvpn_login")
+                    return await self._required("library_entry")
                 await self._follow(card)
             # Public library information page observed through the user's portal.
             await self.page.goto(resource_url("https://lib.bfsu.edu.cn/info/71321.jspx"), wait_until="domcontentloaded", timeout=30000)
@@ -228,6 +234,11 @@ class WOSBackend:
                 token = urlsplit(resource_url("http://www.webofscience.com/")).path.split("/")[2]
                 link = self.page.locator(f'a[href*="{token}"]').first
             if not await link.count():
+                if is_school_login(self.page.url):
+                    access = await self.gateway.ensure(context)
+                    if not access.get("success"):
+                        self.stage = access["authentication_stage"]
+                        return {**access, "source": "wos"}
                 return await self._required("library_entry")
             await self._follow(link)
         if '/wengine-vpn/failed' in self.page.url:
@@ -235,14 +246,20 @@ class WOSBackend:
             # regional landing URL observed after BFSU's successful entry, and
             # still uses the same gateway authorization (no alternate credentials).
             await self.page.goto(resource_url('https://webofscience.clarivate.cn/wos/woscc/smart-search'), wait_until='domcontentloaded', timeout=30000)
+        if is_school_login(self.page.url):
+            access = await self.gateway.ensure(context)
+            if not access.get("success"):
+                self.stage = access["authentication_stage"]
+                return {**access, "source": "wos"}
         for _ in range(80):
             await self._dismiss()
             visible = await self.page.locator('body').inner_text(timeout=5000)
             if ("Beijing Foreign Studies University" in visible and is_wos(self.page.url)
                     and not await contains_login_form(self.page)):
                 self.ready, self.stage = True, "institution_verified"
-                await self.browser.save_cookies()
-                return {"success": True, "authenticated": True, "source": "wos",
+                return {**access, "success": True, "authenticated": True, "source": "wos",
+                        "school_authenticated": True, "shared_school_login": True,
+                        "session_persistence": dict(self.browser.session_persistence_status),
                         "institution": "Beijing Foreign Studies University", "access_mode": "bfsu_webvpn"}
             await asyncio.sleep(0.5)
         return await self._required("wos_institution")

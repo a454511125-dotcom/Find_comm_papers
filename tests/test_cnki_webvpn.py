@@ -71,7 +71,8 @@ class FakePage:
 
     async def goto(self, url, **kwargs):
         self.gotos.append(url)
-        self.url = self.next_url or url
+        self.url = ((ORIGIN + "/" if self.context.authenticated else LOGIN_URL)
+                    if url == ORIGIN + "/" else self.next_url or url)
 
     async def bring_to_front(self):
         self.fronts += 1
@@ -106,12 +107,12 @@ class FakePage:
 
 
 class FakeContext:
-    def __init__(self):
+    def __init__(self, authenticated=False):
         self.pages = []
+        self.authenticated = authenticated
 
     async def new_page(self):
         page = FakePage(self, "about:blank")
-        page.next_url = LOGIN_URL
         self.pages.append(page)
         return page
 
@@ -125,10 +126,12 @@ def test_manual_login_resumes_and_clicks_cnki_popup():
         second = await vpn.ensure(ctx)
         assert second["authentication_required"]
         assert vpn.page.gotos == [ORIGIN + "/"]  # no reloading an in-progress form
+        assert vpn.page.fronts == 1
+        ctx.authenticated = True
         vpn.page.url = ORIGIN + "/"
         done = await vpn.ensure(ctx)
         assert done["authenticated"] and vpn.ready
-        assert len(ctx.pages) == 2
+        assert len(ctx.pages) == 3  # preserved login, reusable probe, CNKI
     asyncio.run(scenario())
 
 
@@ -141,13 +144,14 @@ def test_old_institution_badge_does_not_survive_expired_gateway():
         vpn.page, vpn.ready = page, True
         result = await vpn.ensure(ctx)
         assert result["authentication_required"] and not vpn.ready
-        assert page.gotos == [vpn.home_url]
+        assert page.gotos == []  # rejected by the shared gateway before CNKI
+        assert vpn.gateway.page.gotos == [ORIGIN + "/"]
     asyncio.run(scenario())
 
 
 def test_proxied_cnki_without_school_badge_is_not_authenticated():
     async def scenario():
-        ctx, vpn = FakeContext(), BfsuWebVPN()
+        ctx, vpn = FakeContext(authenticated=True), BfsuWebVPN()
         vpn.page = FakePage(ctx, vpn.home_url)
         ctx.pages.append(vpn.page)
         result = await vpn.ensure(ctx)
@@ -171,12 +175,13 @@ def test_gateway_cookie_cache_is_encrypted_and_scoped(monkeypatch, tmp_path):
     async def scenario():
         browser = BrowserSession(tmp_path / "session", webvpn_enabled=True)
         browser._context = SimpleNamespace(cookies=AsyncMock(return_value=cookies))
-        await browser.save_cookies()
+        browser.webvpn_gateway.ready = True
+        await browser.save_cookies(school_verified=True)
         assert b"gateway" not in browser.cookie_file.read_bytes()
         assert browser.webvpn_cookie_file.read_bytes().startswith(b"ENCRYPT:")
         retained = json.loads(envelope(browser.webvpn_cookie_file.read_bytes(), True))
         assert [c["name"] for c in retained] == ["gateway"]
-        new_context = SimpleNamespace(add_cookies=AsyncMock())
+        new_context = SimpleNamespace(add_cookies=AsyncMock(), cookies=AsyncMock(return_value=[]))
         await browser.load_cookies(new_context)
         loaded = [cookie for call in new_context.add_cookies.call_args_list for cookie in call.args[0]]
         assert {c["name"] for c in loaded} == {"gateway", "cnki"}
@@ -333,8 +338,10 @@ def test_visible_password_form_is_not_saved_as_diagnostic(monkeypatch, tmp_path)
         page = SimpleNamespace(url=proxy_url("https://kns.cnki.net/search"),
                                locator=lambda _: fields, bring_to_front=AsyncMock(),
                                content=AsyncMock(), screenshot=AsyncMock())
+        backend._context = AsyncMock(return_value=FakeContext(authenticated=True))
         result = await backend._verification_result(page, "search")
         assert result["authentication_required"]
+        assert result["authentication_stage"] == "cnki_institution"
         page.content.assert_not_awaited()
         page.screenshot.assert_not_awaited()
     asyncio.run(scenario())
@@ -342,7 +349,7 @@ def test_visible_password_form_is_not_saved_as_diagnostic(monkeypatch, tmp_path)
 
 def test_school_mention_in_body_is_not_an_institution_badge():
     async def scenario():
-        ctx, vpn = FakeContext(), BfsuWebVPN()
+        ctx, vpn = FakeContext(authenticated=True), BfsuWebVPN()
         page = FakePage(ctx, vpn.home_url, False)
         original_locator = page.locator
         page.locator = lambda selector: (SimpleNamespace(inner_text=AsyncMock(return_value="北京外国语大学研究"))
