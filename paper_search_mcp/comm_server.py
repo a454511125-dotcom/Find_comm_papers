@@ -69,12 +69,14 @@ def comm_get_profile() -> dict:
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True})
 async def comm_cnki_authenticate() -> dict:
-    """Check BFSU WebVPN access or open the dedicated browser for manual school login.
+    """Check CNKI access through the shared BFSU school-login session.
 
     No account/password arguments. The user completes login/CAPTCHA in the browser.
     Call again afterwards; CNKI search and download also run this preflight.
     Gateway cookies are saved with Windows DPAPI; no secret is returned.
     This verifies institutional identity, not each paper's full-text entitlement.
+    CNKI and WoS require only ONE school login. If either reports webvpn_login,
+    use the existing shared login page; do not launch another login helper/window.
     """
     return await comm_cnki.authenticate()
 
@@ -98,7 +100,7 @@ async def comm_search_bilingual(query: str, chinese_query: str | None = None,
     query variants for the requested languages (default both zh/en). These are not translated
     by a hidden model/API. Rank each lane, then alternate equal ranks; raw bilingual relevance
     and citation scores are not compared. Return source diagnostics even if one side fails.
-    Chinese search uses a separate persistent browser profile and existing CNKI login cookies;
+    In BFSU mode both databases share one browser and one school-login coordinator;
     it can open a browser and retains session files, but never imports or downloads papers here.
     """
     return await comm_bilingual.search(query, chinese_query, english_queries, languages,
@@ -111,6 +113,8 @@ async def comm_wos_authenticate() -> dict:
     """Open/check BFSU WebVPN → Library → WoS; user completes login in the browser.
 
     Shares the institutional browser with CNKI. No credentials in arguments or output.
+    A pending school login is shared: do not ask the user to log in separately
+    for CNKI and WoS or launch separate helper processes. Resource checks remain separate.
     Call again after login. Search/download automatically perform the same preflight.
     """
     return await comm_wos.authenticate()

@@ -257,9 +257,9 @@ class CNKIBackend:
         mode = get_env("COMM_CNKI_ACCESS_MODE", "direct")
         if mode not in {"direct", "bfsu_webvpn"}:
             raise BrowserConfigurationError("COMM_CNKI_ACCESS_MODE must be direct or bfsu_webvpn")
-        self.webvpn = BfsuWebVPN() if mode == "bfsu_webvpn" else None
         self.browser = BrowserSession(self.session_path, browser_binary, seed_cookie_file,
-                                      webvpn_enabled=self.webvpn is not None)
+                                      webvpn_enabled=mode == "bfsu_webvpn")
+        self.webvpn = BfsuWebVPN(self.browser.webvpn_gateway) if mode == "bfsu_webvpn" else None
         self.retained = RetainedResponses(self.session_path / "downloads", webvpn_enabled=self.webvpn is not None)
         self._active_context = None
         self._pending_search = None
@@ -298,6 +298,7 @@ class CNKIBackend:
             return {"access_mode": "direct", "authentication_required": False,
                     "message": "当前使用知网直连；校外可配置 COMM_CNKI_ACCESS_MODE=bfsu_webvpn。"}
         return {**self.webvpn.status(),
+                "session_persistence": dict(self.browser.session_persistence_status),
                 "cached_session_present": self.browser.webvpn_cookie_file.is_file(),
                 "message": "这是最近一次认证状态；调用 comm_cnki_authenticate 可实时检查或打开登录页。"}
 
@@ -306,8 +307,7 @@ class CNKIBackend:
             return await self.access_status()
         try:
             result = await self.webvpn.ensure(await self._context())
-            await self.browser.save_cookies()
-            return result
+            return {**result, "session_persistence": dict(self.browser.session_persistence_status)}
         except BrowserConfigurationError as exc:
             return {"success": False, "message": str(exc)}
         except Exception as exc:
@@ -330,8 +330,12 @@ class CNKIBackend:
         login_form = await contains_login_form(page)
         if self.webvpn and (not is_proxy_cnki(page.url) or login_form):
             self.webvpn.page = page
+            access = await self.browser.webvpn_gateway.ensure(await self._context())
+            if not access.get("success"):
+                self.webvpn.ready = False
+                return {**access, "source": "cnki"}
             await page.bring_to_front()
-            return self.webvpn.required()
+            return self.webvpn.required("cnki_institution")
         if login_form:
             await page.bring_to_front()
             return {"success": False, "authentication_required": True,

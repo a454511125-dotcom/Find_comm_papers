@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from .comm_cnki_host import CNKIBackend
+from .cnki.browser import BrowserConfigurationError
 from .comm_download import data_dir, verify_pdf
 from .comm_manifest import persistent_lock
 from .config import get_env
@@ -97,7 +98,8 @@ class Worker:
                     if not reply.done():
                         reply.set_result({"success": False, "status": "error",
                                           "stage": wos.stage if provider == 'wos' and wos is not None else operation,
-                                          "message": provider.upper() + ": " + type(exc).__name__})
+                                          "message": str(exc) if isinstance(exc, BrowserConfigurationError)
+                                                     else provider.upper() + ": " + type(exc).__name__})
         finally:
             if wos_browser is not None and wos_browser is not backend.browser:
                 await wos_browser.close()

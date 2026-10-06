@@ -9,7 +9,7 @@
 ```text
 Find_comm_papers/
 ├── launch.py                       # 源码启动入口与工具自检
-├── library_login.py                # CNKI / WoS 交互式学校认证
+├── library_login.py                # 一次学校登录，分别检查 CNKI / WoS
 ├── .env.example                    # 本地配置模板
 ├── paper_search_mcp/
 │   ├── comm_server.py              # MCP 工具与工作流入口
@@ -87,11 +87,14 @@ PAPER_SEARCH_MCP_ENV_FILE = 'D:\Research\Find_comm_papers\.env'
 
 ```powershell
 .\.venv\Scripts\python.exe -I -B launch.py --self-check
-.\.venv\Scripts\python.exe -I -B library_login.py cnki
-.\.venv\Scripts\python.exe -I -B library_login.py wos
+.\.venv\Scripts\python.exe -I -B library_login.py
 ```
 
-自检列出默认注册的 18 个工具，不验证网络或订阅权限。登录脚本打开专用浏览器并等待手动登录，确认机构身份后退出。MCP 内也可以直接调用认证工具；检索和下载包含认证前置检查。出现验证码或登录失效时，在服务打开的浏览器完成操作后重试。
+自检列出默认注册的 18 个工具，不验证网络或订阅权限。登录脚本默认在同一进程中完成一次学校登录，再分别检查 CNKI 和 WoS；仍可用 `library_login.py cnki` 或 `library_login.py wos` 只检查一个数据库。`--status-file` 可保存不含凭据的检查状态。MCP 内的两个认证工具以及检索、下载也共用学校会话，数据库验证码和机构访问权限分别检查。
+
+浏览器配置保存在数据目录的 `cnki/browser-profiles/` 下，重启后继续复用；知网直连和 WebVPN 配置相互独立。学校验证成功后立即加密保存会话，未登录、检索失败和普通关闭操作不会覆盖已验证的学校缓存。恢复时优先保留浏览器配置中较新的 Cookie，并从缓存补回缺失的会话 Cookie。学校服务器使会话过期或撤销登录后，仍需在页面完成正常登录。
+
+同一浏览器配置由一个进程持有。MCP 已打开文献浏览器时，直接使用 MCP 的认证工具；需要切换到独立辅助脚本时，先关闭原文献浏览器。升级后重新加载 MCP，避免旧进程继续使用原有缓存写入方式。`session_persistence` 报告缓存恢复或保存状态，保存失败与当前学校登录无效分别处理。
 
 ### Clash Verge 网络规则
 
@@ -161,13 +164,13 @@ prepend:
 
 ## 测试
 
-离线测试覆盖学校 URL 改写、认证状态、WoS Full Record、浏览器工作线程、文件响应捕获、PDF 身份核验和双语路由。下列命令保留测试产物，不自动清理临时目录：
+离线测试覆盖共享学校登录、旧标签页恢复、浏览器配置跨次复用、进程互斥、Cookie 恢复优先级、保存失败、WoS Full Record、PDF 身份核验和双语路由。下列命令保留测试产物，不自动清理临时目录：
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
 $env:COMM_TEST_ARTIFACTS = 'D:\Research\FindPapersTestArtifacts'
-.\.venv\Scripts\python.exe -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_wos.py tests/test_cnki_webvpn.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py tests/test_comm_bilingual.py tests/test_source_launchers.py -q
+.\.venv\Scripts\python.exe -m pytest -p no:tmpdir -p no:cacheprovider -p tests.retained_tmp tests/test_comm_wos.py tests/test_cnki_webvpn.py tests/test_cnki_homepage.py tests/test_unified_cnki_runtime.py tests/test_comm_bilingual.py tests/test_shared_webvpn_login.py tests/test_browser_session_persistence.py tests/test_institution_login_helper.py tests/test_source_launchers.py -q
 ```
 
 离线测试与工具注册检查不代替真实机构访问；真实全文下载需在用户自己的学校权限下验证。
